@@ -1,0 +1,31 @@
+name: build
+on: { push: { branches: [fabric-cosmicchat] }, workflow_dispatch: {} }
+permissions: { contents: write }
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[built]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '9.2.1' }
+      - name: Resolve versions
+        run: |
+          MC=1.21.11
+          LOADER=$(curl -s https://meta.fabricmc.net/v2/versions/loader | jq -r '[.[]|select(.stable)][0].version')
+          FAPI=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml | grep -o "<version>[^<]*+$MC</version>" | tail -1 | sed 's/<[^>]*>//g')
+          LOOM=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-loom/maven-metadata.xml | grep -o '<version>1\.[0-9]*\.[0-9]*</version>' | sed 's/<[^>]*>//g' | sort -V | tail -1)
+          printf "minecraft_version=%s\nloader_version=%s\nfabric_version=%s\nloom_version=%s\norg.gradle.jvmargs=-Xmx3G\n" $MC $LOADER $FAPI $LOOM | tee gradle.properties
+      - name: Build
+        run: gradle build --stacktrace 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: Commit result
+        if: always()
+        run: |
+          mkdir -p out && rm -f out/*
+          cp build.log gradle.properties out/ || true
+          cp build/libs/CosmicChat-fabric-*.jar out/ 2>/dev/null || true
+          rm -f out/*-sources.jar
+          git config user.name ci; git config user.email ci@users.noreply.github.com
+          git add -f out && git commit -m "CI output [built] (${{ job.status }})" && git push

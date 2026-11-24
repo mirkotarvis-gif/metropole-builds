@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "cosmicchat",
+  "version": "${version}",
+  "name": "Cosmic Chat",
+  "description": "Press J to hide player chat while recording. Death, join and leave messages and command replies still show.",
+  "environment": "client",
+  "entrypoints": { "client": ["me.cosmic.chat.CosmicChat"] },
+  "depends": { "fabricloader": ">=0.16.0", "fabric-api": "*", "minecraft": "~1.21.11" }
+}
