@@ -10,13 +10,13 @@ jobs:
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: '21' }
       - uses: gradle/actions/setup-gradle@v4
-        with: { gradle-version: current }
+        with: { gradle-version: '9.2.1' }
       - name: Resolve versions
         run: |
           MC=1.21.11
           LOADER=$(curl -s https://meta.fabricmc.net/v2/versions/loader | jq -r '[.[]|select(.stable)][0].version')
           FAPI=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/maven-metadata.xml | grep -o "<version>[^<]*+$MC</version>" | tail -1 | sed 's/<[^>]*>//g')
-          LOOM=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-loom/maven-metadata.xml | grep -o '<version>1\.[0-9]*\.[0-9]*</version>' | sed 's/<[^>]*>//g' | sort -V | tail -1)
+          LOOM=$(curl -s https://maven.fabricmc.net/net/fabricmc/fabric-loom/maven-metadata.xml | grep -o '<version>1\.14\.[0-9]*</version>' | sed 's/<[^>]*>//g' | sort -V | tail -1)
           printf "minecraft_version=%s\nloader_version=%s\nfabric_version=%s\nloom_version=%s\norg.gradle.jvmargs=-Xmx3G\n" $MC $LOADER $FAPI $LOOM | tee gradle.properties
       - name: Build
         run: gradle build --stacktrace 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
