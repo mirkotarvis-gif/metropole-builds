@@ -60,7 +60,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     /** ready-to-use real accounts {name, skinValue, skinSignature}, filled in the background so /randomizenick is instant */
     private final java.util.concurrent.ConcurrentLinkedDeque<String[]> pool = new java.util.concurrent.ConcurrentLinkedDeque<>();
     private final java.util.concurrent.atomic.AtomicBoolean filling = new java.util.concurrent.atomic.AtomicBoolean();
-    private static final int POOL_SIZE = 60;
+    private static final int POOL_SIZE = 150;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -321,7 +321,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (pool.size() >= POOL_SIZE || !filling.compareAndSet(false, true)) return;
         try {
             int rounds = 0, before = pool.size();
-            while (pool.size() < POOL_SIZE && rounds++ < 12) {
+            while (pool.size() < POOL_SIZE && rounds++ < 25) {
                 List<String> cands = new ArrayList<>();
                 while (cands.size() < 10) { String n = randomCandidate(); if (n.length() >= 8 && n.length() <= 16 && !cands.contains(n)) cands.add(n); }
                 List<String[]> found = bulk(cands);
