@@ -27,7 +27,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                     pl.spawn(n, l, GameMode.SURVIVAL, s, b -> { if (b != null) s.sendMessage(G + "Spawned PvP bot " + W + n); });
                 }
                 case "remove" -> { Bot b = need(s, a, 1); if (b != null) { pl.remove(b, "Removed"); s.sendMessage(G + "Removed " + b.name); } }
-                case "removeall" -> { int n = pl.bots.size(); for (Bot b : new ArrayList<>(pl.bots.values())) pl.remove(b, "Removed"); s.sendMessage(G + "Removed " + n + " bots"); }
+                case "removeall" -> { int n = pl.removeAll(); s.sendMessage(G + "Removed " + n + " bots"); }
                 case "reload" -> { st.load(); s.sendMessage(G + "Reloaded settings, factions, kits and paths"); }
                 case "list" -> s.sendMessage(Y + "Bots (" + pl.bots.size() + "): " + W + (pl.bots.isEmpty() ? "none" : String.join(", ", names())));
                 case "inventory" -> { Bot b = need(s, a, 1); if (b != null && s instanceof Player p) p.openInventory(b.p.getInventory()); }

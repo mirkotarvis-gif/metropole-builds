@@ -20,8 +20,14 @@ final class Nms {
     /** join a fake player with this profile (authlib GameProfile or null) and return [nmsPlayer, bukkitPlayer] */
     static Object[] join(String name, Object profile, Location where) throws Throwable {
         Class<?> GP = cls("com.mojang.authlib.GameProfile");
+        // a failed skin lookup gives a profile with an empty (all zero) UUID; every bot would share it and vanish
+        if (profile != null && GP.isInstance(profile)) {
+            UUID pid = profileId(profile);
+            if (pid == null || (pid.getMostSignificantBits() == 0 && pid.getLeastSignificantBits() == 0) || Bukkit.getPlayer(pid) != null) profile = null;
+        }
         if (profile == null || !GP.isInstance(profile)) {
             UUID id = UUID.nameUUIDFromBytes(("OfflinePlayer:" + name).getBytes(StandardCharsets.UTF_8));
+            if (Bukkit.getPlayer(id) != null) id = UUID.randomUUID();
             profile = construct(GP, id, name);
         }
         Object server = invoke(Bukkit.getServer(), "getServer");
@@ -46,12 +52,25 @@ final class Nms {
             Object pp = Bukkit.class.getMethod("createProfile", String.class).invoke(null, name);
             invoke(pp, "complete", true);
             for (String m : new String[]{"buildGameProfile", "getGameProfile", "asAuthlibCopy"}) {
-                try { Object g = invoke(pp, m); if (g != null) return g; } catch (Throwable ignored) {}
+                try { Object g = invoke(pp, m); if (g != null) { UUID u = profileId(g); return u == null || (u.getMostSignificantBits() == 0 && u.getLeastSignificantBits() == 0) ? null : g; } } catch (Throwable ignored) {}
             }
         } catch (Throwable ignored) {}
         return null;
     }
 
+    static UUID profileId(Object gp) {
+        for (String m : new String[]{"id", "getId"}) { try { Object o = invoke(gp, m); if (o instanceof UUID u) return u; } catch (Throwable ignored) {} }
+        return null;
+    }
+    /** true if this online player is one of our fake players (fake netty channel) */
+    static boolean isFake(Player p) {
+        try {
+            Object sp = invoke(p, "getHandle");
+            Object conn = getField(getField(sp, "connection"), "connection");
+            Object ch = getField(conn, "channel");
+            return ch != null && ch.getClass().getName().endsWith("EmbeddedChannel");
+        } catch (Throwable t) { return false; }
+    }
     static void remove(Object sp, String why) {
         try {
             Object text = staticCall(cls("net.minecraft.network.chat.Component"), "literal", why);

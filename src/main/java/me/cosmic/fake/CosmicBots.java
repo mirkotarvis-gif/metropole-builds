@@ -103,6 +103,17 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         Nms.remove(b.nms, why);
         saveBots();
     }
+    /** remove every bot, including stuck/ghost fake players the list lost track of */
+    int removeAll() {
+        int n = 0;
+        for (Bot b : new ArrayList<>(bots.values())) { remove(b, "Removed"); n++; }
+        for (Player p : new ArrayList<>(Bukkit.getOnlinePlayers())) {
+            if (!Nms.isFake(p)) continue;
+            try { Nms.remove(Nms.invoke(p, "getHandle"), "Removed"); n++; } catch (Throwable ignored) {}
+        }
+        bots.clear(); saveBots();
+        return n;
+    }
     void saveBots() {
         YamlConfiguration y = new YamlConfiguration();
         for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); if (b.forced != null) y.set(b.name + ".forced", b.forced.toString()); }
