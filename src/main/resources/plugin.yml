@@ -1,0 +1,16 @@
+name: CosmicBots
+version: 2.0.0
+main: me.cosmic.fake.CosmicBots
+api-version: '1.21'
+description: Carpet-style fake players + PvP bots (factions, kits, paths, settings) for Paper
+commands:
+  player:
+    description: Carpet-style fake players
+    permission: cosmicbots.use
+  pvpbot:
+    description: PvP bots
+    aliases: [pb]
+    permission: cosmicbots.use
+permissions:
+  cosmicbots.use:
+    default: op
