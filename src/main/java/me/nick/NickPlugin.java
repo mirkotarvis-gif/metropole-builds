@@ -56,7 +56,11 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     private final Set<String> reserved = ConcurrentHashMap.newKeySet();
     private final HttpClient http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     private final Random rng = new Random();
-    private File nickFile, skinFile, bypassFile;
+    private File nickFile, skinFile, bypassFile, poolFile;
+    /** ready-to-use real accounts {name, skinValue, skinSignature}, filled in the background so /randomizenick is instant */
+    private final java.util.concurrent.ConcurrentLinkedDeque<String[]> pool = new java.util.concurrent.ConcurrentLinkedDeque<>();
+    private final java.util.concurrent.atomic.AtomicBoolean filling = new java.util.concurrent.atomic.AtomicBoolean();
+    private static final int POOL_SIZE = 60;
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -76,10 +80,14 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         Bukkit.getPluginManager().registerEvents(this, this);
         for (Player p : Bukkit.getOnlinePlayers()) { rememberOriginalSkin(p); apply(p); applySavedSkin(p); }
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 20L, 5L);
+        poolFile = new File(getDataFolder(), "name-pool.txt");
+        loadPool();
+        Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::refill, 40L, 200L);
     }
 
     @Override
     public void onDisable() {
+        savePool();
         for (TextDisplay d : tags.values()) if (d != null && d.isValid()) d.remove();
         tags.clear();
     }
@@ -257,37 +265,128 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         return p.hasPermission("randomnick.bypass") || bypass.containsKey(p.getUniqueId().toString());
     }
 
-    /** Find a real account (prefer one with a custom skin) and apply it. Runs lookups async. */
+    // ---------------------------------------------------------------- name pool (instant random nicks)
+
+    private void loadPool() {
+        if (!poolFile.exists()) return;
+        try (BufferedReader r = new BufferedReader(new FileReader(poolFile, StandardCharsets.UTF_8))) {
+            String l; while ((l = r.readLine()) != null) { String[] f = l.split("\t", -1); if (f.length == 3 && VALID.matcher(f[0]).matches()) pool.add(new String[]{f[0], f[1].isEmpty() ? null : f[1], f[2].isEmpty() ? null : f[2]}); }
+        } catch (IOException e) { getLogger().warning("pool load: " + e); }
+    }
+
+    private synchronized void savePool() {
+        if (poolFile == null) return;
+        try (Writer w = new OutputStreamWriter(new FileOutputStream(poolFile), StandardCharsets.UTF_8)) {
+            for (String[] e : pool) w.write(e[0] + "\t" + (e[1] == null ? "" : e[1]) + "\t" + (e[2] == null ? "" : e[2]) + "\n");
+        } catch (IOException e) { getLogger().warning("pool save: " + e); }
+    }
+
+    private boolean inPool(String n) { for (String[] e : pool) if (e[0].equalsIgnoreCase(n)) return true; return false; }
+
+    private String post(String url, String json) throws Exception {
+        HttpRequest req = HttpRequest.newBuilder(URI.create(url)).timeout(Duration.ofSeconds(6))
+                .header("User-Agent", "NickPlugin").header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json)).build();
+        HttpResponse<String> res = http.send(req, HttpResponse.BodyHandlers.ofString());
+        return res.statusCode() == 200 ? res.body() : null;
+    }
+
+    /** one request checks 10 names at once; returns {id, name} of the ones that are real accounts */
+    private List<String[]> bulk(List<String> names) {
+        StringBuilder b = new StringBuilder("[");
+        for (int i = 0; i < names.size(); i++) b.append(i > 0 ? "," : "").append('"').append(names.get(i)).append('"');
+        String body = b.append(']').toString();
+        String res = null;
+        try { res = post("https://api.minecraftservices.com/minecraft/profile/lookup/bulk/byname", body); } catch (Exception ignored) { }
+        if (res == null) try { res = post("https://api.mojang.com/profiles/minecraft", body); } catch (Exception ignored) { }
+        if (res == null) return null;
+        List<String[]> out = new ArrayList<>();
+        Matcher m = Pattern.compile("\\{[^{}]*\\}").matcher(res);
+        while (m.find()) { String o = m.group(), id = field(o, "id"), n = field(o, "name"); if (id != null && n != null) out.add(new String[]{id, n}); }
+        return out;
+    }
+
+    /** {name, skinValue, skinSignature} for an account id, skin null if it uses a default skin */
+    private String[] skinOf(String id, String name) {
+        try {
+            String sess = get("https://sessionserver.mojang.com/session/minecraft/profile/" + id + "?unsigned=false");
+            if (sess == null) return null;
+            String value = field(sess, "value"), sig = field(sess, "signature");
+            if (value != null && !new String(Base64.getDecoder().decode(value), StandardCharsets.UTF_8).contains("\"SKIN\"")) value = null;
+            return new String[]{name, value, value == null ? null : sig};
+        } catch (Exception e) { return null; }
+    }
+
+    /** keeps POOL_SIZE real long-named accounts with skins ready (runs async) */
+    private void refill() {
+        if (pool.size() >= POOL_SIZE || !filling.compareAndSet(false, true)) return;
+        try {
+            int rounds = 0, before = pool.size();
+            while (pool.size() < POOL_SIZE && rounds++ < 12) {
+                List<String> cands = new ArrayList<>();
+                while (cands.size() < 10) { String n = randomCandidate(); if (n.length() >= 8 && n.length() <= 16 && !cands.contains(n)) cands.add(n); }
+                List<String[]> found = bulk(cands);
+                if (found == null) break; // rate limited, try again later
+                for (String[] f : found) {
+                    if (f[1].length() < 8 || inPool(f[1]) || nameTaken(f[1])) continue;
+                    String[] r = skinOf(f[0], f[1]);
+                    if (r != null && r[1] != null) pool.add(r);
+                    try { Thread.sleep(100); } catch (InterruptedException ignored) { }
+                }
+                try { Thread.sleep(300); } catch (InterruptedException ignored) { }
+            }
+            if (pool.size() != before) savePool();
+        } finally { filling.set(false); }
+    }
+
+    private String[] takeFromPool() {
+        String[] e;
+        while ((e = pool.pollFirst()) != null) if (!nameTaken(e[0])) return e;
+        return null;
+    }
+
+    private void applyPick(Player p, String[] pick, CommandSender reportTo) {
+        nicks.setProperty(p.getUniqueId().toString(), pick[0]);
+        store(nicks, nickFile);
+        apply(p);
+        if (pick[1] != null) {
+            skins.setProperty(p.getUniqueId().toString(), pick[1] + "|" + (pick[2] == null ? "" : pick[2]));
+            store(skins, skinFile);
+            setSkin(p, pick[1], pick[2]);
+        }
+        if (reportTo != null) reportTo.sendMessage("§a" + p.getName() + " §7→ §f" + pick[0] + (pick[1] != null ? " §7(+ skin)" : " §7(no custom skin)"));
+    }
+
+    /** Give a real account's name + skin. Instant from the ready pool; slow lookup only if the pool is empty. */
     private void randomize(Player p, CommandSender reportTo) {
+        String[] ready = takeFromPool();
+        if (ready != null) {
+            applyPick(p, ready, reportTo);
+            Bukkit.getScheduler().runTaskAsynchronously(this, () -> { savePool(); refill(); });
+            return;
+        }
+        if (reportTo != null) reportTo.sendMessage("§7Name pool is empty, looking one up for " + p.getName() + "...");
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             String[] best = null;
-            for (int i = 0; i < 60; i++) {
-                String cand = randomCandidate();
-                if (cand.length() < 8 || cand.length() > 16 || nameTaken(cand)) continue;
-                String[] r = lookup(cand);
-                if (r == null || r[0].length() < 8 || nameTaken(r[0])) continue;
-                if (best == null) best = r;
-                if (r[1] != null) { best = r; break; } // has a real custom skin
-                try { Thread.sleep(150); } catch (InterruptedException ignored) { }
+            for (int round = 0; round < 6 && best == null; round++) {
+                List<String> cands = new ArrayList<>();
+                while (cands.size() < 10) { String n = randomCandidate(); if (n.length() >= 8 && !cands.contains(n)) cands.add(n); }
+                List<String[]> found = bulk(cands);
+                if (found == null) break;
+                for (String[] f : found) {
+                    if (f[1].length() < 8 || nameTaken(f[1])) continue;
+                    String[] r = skinOf(f[0], f[1]);
+                    if (r == null) continue;
+                    if (best == null) best = r;
+                    if (r[1] != null) { best = r; break; }
+                }
             }
             final String[] pick = best;
             if (pick != null) reserved.add(pick[0].toLowerCase());
             Bukkit.getScheduler().runTask(this, () -> {
                 if (pick != null) reserved.remove(pick[0].toLowerCase());
                 if (!p.isOnline()) return;
-                if (pick == null) {
-                    if (reportTo != null) reportTo.sendMessage("§cCouldn't reach Mojang for " + p.getName() + " (rate limit?). Try again in a minute.");
-                    return;
-                }
-                nicks.setProperty(p.getUniqueId().toString(), pick[0]);
-                store(nicks, nickFile);
-                apply(p);
-                if (pick[1] != null) {
-                    skins.setProperty(p.getUniqueId().toString(), pick[1] + "|" + (pick[2] == null ? "" : pick[2]));
-                    store(skins, skinFile);
-                    setSkin(p, pick[1], pick[2]);
-                }
-                if (reportTo != null) reportTo.sendMessage("§a" + p.getName() + " §7→ §f" + pick[0] + (pick[1] != null ? " §7(+ skin)" : " §7(no custom skin)"));
+                if (pick == null) { if (reportTo != null) reportTo.sendMessage("§cCouldn't reach Mojang for " + p.getName() + " (rate limit?). Try again in a minute."); return; }
+                applyPick(p, pick, reportTo);
             });
         });
     }
@@ -381,7 +480,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (a.length == 0) {
             int n = 0;
             for (Player p : Bukkit.getOnlinePlayers()) if (!isBypassed(p)) { randomize(p, s); n++; }
-            s.sendMessage("§eRandomizing §f" + n + " §eplayer(s)... §7(looking up real accounts)");
+            s.sendMessage("§eRandomized §f" + n + " §eplayer(s). §7(" + pool.size() + " names left ready)");
             return true;
         }
         String sub = a[0].toLowerCase();
@@ -415,7 +514,6 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
             Player t = find(a[0]);
             if (t == null) { s.sendMessage("§cPlayer not found: " + a[0]); return true; }
             randomize(t, s);
-            s.sendMessage("§eRandomizing §f" + t.getName() + "§e...");
             return true;
         }
         s.sendMessage("§eUsage: §f/randomizenick §7(everyone) §f| /randomizenick <player> | clear | bypass <player> | bypass list");

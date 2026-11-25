@@ -1,5 +1,5 @@
 name: NickPlugin
-version: 1.4.1
+version: 1.5.0
 main: me.nick.NickPlugin
 api-version: '1.21'
 description: Nicknames (TAB, chat, death/join/leave/advancement messages, floating name tag) + random real-account nicks and skins.
