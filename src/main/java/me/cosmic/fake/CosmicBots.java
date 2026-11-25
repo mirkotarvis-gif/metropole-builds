@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 public final class CosmicBots extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     final Map<String, Bot> bots = new LinkedHashMap<>();
     final Set<String> pending = new HashSet<>();
+    int spawnGen;
     Store store; Brain brain; PvpCmd pvp;
     long ticks;
     final Random rnd = new Random();
@@ -60,9 +61,11 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         if (store.b("safe-spawn")) { where.getChunk().load(); where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1)); }
         final Location at = where;
         pending.add(name.toLowerCase(Locale.ROOT));
+        final int gen = spawnGen;
         Runnable join = null;
         Consumer<Object> finish = prof -> Bukkit.getScheduler().runTask(this, () -> {
             pending.remove(name.toLowerCase(Locale.ROOT));
+            if (gen != spawnGen) { if (done != null) done.accept(null); return; }
             try {
                 Object[] r = Nms.join(name, prof, at);
                 Bot b = new Bot(name, r[0], (Player) r[1]);

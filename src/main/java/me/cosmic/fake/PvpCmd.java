@@ -13,6 +13,7 @@ import java.util.*;
 /** /pvpbot: spawn, remove, removeall, reload, list, inventory, mass-spawn, attack, stop-attack, faction, kit, path, settings */
 final class PvpCmd implements CommandExecutor, TabCompleter {
     final CosmicBots pl; final Store st;
+    final List<org.bukkit.scheduler.BukkitTask> spawning = new ArrayList<>();
     PvpCmd(CosmicBots pl) { this.pl = pl; this.st = pl.store; }
     static final String G = "§a", R = "§c", Y = "§e", W = "§f", D = "§7";
 
@@ -27,7 +28,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                     pl.spawn(n, l, GameMode.SURVIVAL, s, b -> { if (b != null) s.sendMessage(G + "Spawned PvP bot " + W + n); });
                 }
                 case "remove" -> { Bot b = need(s, a, 1); if (b != null) { pl.remove(b, "Removed"); s.sendMessage(G + "Removed " + b.name); } }
-                case "removeall" -> { int n = pl.removeAll(); s.sendMessage(G + "Removed " + n + " bots"); }
+                case "removeall" -> { for (org.bukkit.scheduler.BukkitTask t : spawning) t.cancel(); spawning.clear(); pl.spawnGen++; int n = pl.removeAll(); s.sendMessage(G + "Removed " + n + " bots"); }
                 case "reload" -> { st.load(); s.sendMessage(G + "Reloaded settings, factions, kits and paths"); }
                 case "list" -> s.sendMessage(Y + "Bots (" + pl.bots.size() + "): " + W + (pl.bots.isEmpty() ? "none" : String.join(", ", names())));
                 case "inventory" -> { Bot b = need(s, a, 1); if (b != null && s instanceof Player p) p.openInventory(b.p.getInventory()); }
@@ -36,17 +37,23 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                     if (n < 1 || n > max) { s.sendMessage(R + "1-" + max + " (change with /pvpbot settings max-mass-spawn)"); return true; }
                     Location base = s instanceof Player p ? p.getLocation() : Bukkit.getWorlds().get(0).getSpawnLocation();
                     int[] ok = {0}, bad = {0};
+                    spawning.removeIf(t -> t.isCancelled() || !Bukkit.getScheduler().isQueued(t.getTaskId()));
                     for (int i = 0; i < n; i++) {
                         final int k = i;
-                        Bukkit.getScheduler().runTaskLater(pl, () -> {
+                        spawning.add(Bukkit.getScheduler().runTaskLater(pl, () -> {
                             double an = k * 2.4, r = 2 + Math.sqrt(k) * 1.6;
                             pl.spawn(pl.randomName(), base.clone().add(Math.cos(an) * r, 0, Math.sin(an) * r), GameMode.SURVIVAL, null, b -> {
                                 if (b != null) ok[0]++; else bad[0]++;
                                 if (ok[0] + bad[0] == n) s.sendMessage(G + "Mass spawn done: " + W + ok[0] + G + " online" + (bad[0] > 0 ? R + ", " + bad[0] + " failed (see console)" : "") + D + " | bots online now: " + pl.bots.size());
                             });
-                        }, 2L * i);
+                        }, 2L * i));
                     }
-                    s.sendMessage(G + "Spawning " + n + " bots...");
+                    s.sendMessage(G + "Spawning " + n + " bots... " + D + "(/pvpbot stop-spawn to stop)");
+                }
+                case "stop-spawn", "stopspawn", "cancel-spawn" -> {
+                    int n = 0; for (org.bukkit.scheduler.BukkitTask t : spawning) if (Bukkit.getScheduler().isQueued(t.getTaskId())) { t.cancel(); n++; }
+                    spawning.clear(); pl.spawnGen++;
+                    s.sendMessage(G + "Stopped spawning" + D + " (" + n + " bots cancelled, " + pl.bots.size() + " online)");
                 }
                 case "attack" -> { Bot b = need(s, a, 1); Entity t = entity(a[2]); if (b == null) return true; if (t == null) { s.sendMessage(R + "No target " + a[2]); return true; } b.forced = t.getUniqueId(); s.sendMessage(G + b.name + " attacks " + a[2]); }
                 case "stop-attack" -> { Bot b = need(s, a, 1); if (b != null) { b.forced = null; b.revenge = null; s.sendMessage(G + b.name + " stopped attacking"); } }
@@ -279,7 +286,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
     }
     void help(CommandSender s) {
         s.sendMessage(Y + "§lPvP Bots");
-        s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | reload");
+        s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | stop-spawn | reload");
         s.sendMessage(D + "/pvpbot attack <bot> <target> | stop-attack <bot>");
         s.sendMessage(D + "/pvpbot target <bot|all|faction> add|set|remove|clear|list [players...]");
         s.sendMessage(D + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|reset>");
@@ -294,10 +301,10 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         List<String> bots = names(), facs = new ArrayList<>(st.factions.keySet()), kits = new ArrayList<>(st.kits.keySet()), paths = new ArrayList<>(st.paths.keySet());
         List<String> players = new ArrayList<>(); for (Player p : Bukkit.getOnlinePlayers()) players.add(p.getName());
-        if (a.length > 1 && a[0].equalsIgnoreCase("bot-management")) { if (a.length == 2) { out.addAll(List.of("list", "inventory", "mass-spawn", "attack", "stop-attack")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
+        if (a.length > 1 && a[0].equalsIgnoreCase("bot-management")) { if (a.length == 2) { out.addAll(List.of("list", "inventory", "mass-spawn", "stop-spawn", "attack", "stop-attack")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         if (a.length > 1 && a[0].equalsIgnoreCase("kit")) { if (a.length == 2) { out.addAll(List.of("create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         String a0 = a[0].toLowerCase(Locale.ROOT);
-        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "attack", "stop-attack", "target", "difficulty", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
+        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "stop-spawn", "attack", "stop-attack", "target", "difficulty", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
         else if (a.length == 2) switch (a0) {
             case "remove", "inventory", "attack", "stop-attack" -> out.addAll(bots);
             case "faction" -> out.addAll(List.of("list", "create", "delete", "info", "add", "remove", "add-near", "add-all", "hostile", "attack", "give", "tp", "path", "kit"));
