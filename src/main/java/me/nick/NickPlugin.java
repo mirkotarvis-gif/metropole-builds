@@ -223,14 +223,24 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         }
     }
 
+    /** Longer, normal-looking usernames (8-16 chars), e.g. CosmicWolf, pizza_hunter, ShadowFox27. */
     private String randomCandidate() {
-        String w = WORDS[rng.nextInt(WORDS.length)];
-        switch (rng.nextInt(4)) {
-            case 0: return w;
-            case 1: return Character.toUpperCase(w.charAt(0)) + w.substring(1);
-            case 2: return w + WORDS[rng.nextInt(WORDS.length)];
-            default: return w + (rng.nextInt(99) + 1);
+        for (int tries = 0; tries < 50; tries++) {
+            String a = WORDS[rng.nextInt(WORDS.length)], b = WORDS[rng.nextInt(WORDS.length)];
+            if (a.equals(b)) continue;
+            String A = Character.toUpperCase(a.charAt(0)) + a.substring(1), B = Character.toUpperCase(b.charAt(0)) + b.substring(1);
+            String n;
+            switch (rng.nextInt(6)) {
+                case 0: n = A + B; break;
+                case 1: n = a + b; break;
+                case 2: n = a + "_" + b; break;
+                case 3: n = A + B + (rng.nextInt(99) + 1); break;
+                case 4: n = "The" + A + B; break;
+                default: n = a + b + (rng.nextInt(9000) + 1000); break;
+            }
+            if (n.length() >= 8 && n.length() <= 16) return n;
         }
+        return "cosmic" + (rng.nextInt(9000) + 1000);
     }
 
     private boolean nameTaken(String n) {
@@ -251,11 +261,11 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     private void randomize(Player p, CommandSender reportTo) {
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             String[] best = null;
-            for (int i = 0; i < 25; i++) {
+            for (int i = 0; i < 60; i++) {
                 String cand = randomCandidate();
-                if (cand.length() > 16 || nameTaken(cand)) continue;
+                if (cand.length() < 8 || cand.length() > 16 || nameTaken(cand)) continue;
                 String[] r = lookup(cand);
-                if (r == null || nameTaken(r[0])) continue;
+                if (r == null || r[0].length() < 8 || nameTaken(r[0])) continue;
                 if (best == null) best = r;
                 if (r[1] != null) { best = r; break; } // has a real custom skin
                 try { Thread.sleep(150); } catch (InterruptedException ignored) { }
