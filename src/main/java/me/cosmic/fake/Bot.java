@@ -31,4 +31,10 @@ final class Bot {
     Location idleGoal, lastPos;
     String path; int pathIdx; int pathDir = 1;
     boolean blocking;
+
+    // ---- pvp skill (1-100, -1 = use the global 'skill' setting) and chosen targets
+    int skill = -1;
+    final java.util.LinkedHashSet<String> targets = new java.util.LinkedHashSet<>();
+    int tapTicks, webTicks; long stunAt = -1, lastPearl, lastGap, maceSeen, retotemAt, spawnedAt;
+    boolean critPlan, antiMace, removing; long lastKickLog = -1000;
 }

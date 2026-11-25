@@ -74,6 +74,28 @@ final class Nms {
         }
     }
 
+    /** turn the bot's body, head and view (works without a client) */
+    static void rotate(Object sp, float yaw, float pitch) {
+        try { invoke(sp, "setYRot", yaw); invoke(sp, "setXRot", pitch); } catch (Throwable ignored) {}
+        try { invoke(sp, "setYHeadRot", yaw); } catch (Throwable ignored) {}
+        try { invoke(sp, "setYBodyRot", yaw); } catch (Throwable ignored) {}
+    }
+    /** pretend the bot answered the keep-alive so the server never times it out */
+    static void keepAlive(Object sp) {
+        try {
+            Object c = getField(sp, "connection");
+            setBool(c, "keepAlivePending", false);
+            Object ms = staticCall(cls("net.minecraft.Util"), "getMillis");
+            setLongField(c, "keepAliveTime", ((Number) ms).longValue());
+        } catch (Throwable ignored) {}
+    }
+    static void setBool(Object o, String name, boolean v) {
+        for (Class<?> c = o.getClass(); c != null; c = c.getSuperclass()) try { Field f = c.getDeclaredField(name); f.setAccessible(true); f.setBoolean(o, v); return; } catch (Throwable ignored) {}
+    }
+    static void setLongField(Object o, String name, long v) {
+        for (Class<?> c = o.getClass(); c != null; c = c.getSuperclass()) try { Field f = c.getDeclaredField(name); f.setAccessible(true); f.setLong(o, v); return; } catch (Throwable ignored) {}
+    }
+
     static Object hand(boolean off) throws Throwable { return cls("net.minecraft.world.InteractionHand").getEnumConstants()[off ? 1 : 0]; }
     static void startUsing(Object sp, boolean off) { try { invoke(sp, "startUsingItem", hand(off)); } catch (Throwable ignored) {} }
     static void releaseUsing(Object sp) { try { invoke(sp, "releaseUsingItem"); } catch (Throwable ignored) {} }

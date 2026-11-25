@@ -23,6 +23,7 @@ import java.util.function.Consumer;
 
 public final class CosmicBots extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     final Map<String, Bot> bots = new LinkedHashMap<>();
+    final Set<String> pending = new HashSet<>();
     Store store; Brain brain; PvpCmd pvp;
     long ticks;
     final Random rnd = new Random();
@@ -46,14 +47,17 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     /** spawn a bot; done is called on the main thread with the bot or null */
     void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done) {
         if (!name.matches("[A-Za-z0-9_]{3,16}")) { if (tell != null) tell.sendMessage("§cNames are 3-16 letters, numbers or _"); if (done != null) done.accept(null); return; }
-        if (bot(name) != null || Bukkit.getPlayerExact(name) != null) { if (tell != null) tell.sendMessage("§c" + name + " is already online."); if (done != null) done.accept(null); return; }
+        if (bot(name) != null || Bukkit.getPlayerExact(name) != null || pending.contains(name.toLowerCase(Locale.ROOT))) { if (tell != null) tell.sendMessage("§c" + name + " is already online."); if (done != null) done.accept(null); return; }
         if (store.b("safe-spawn")) where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1));
         final Location at = where;
+        pending.add(name.toLowerCase(Locale.ROOT));
         Runnable join = null;
         Consumer<Object> finish = prof -> Bukkit.getScheduler().runTask(this, () -> {
+            pending.remove(name.toLowerCase(Locale.ROOT));
             try {
                 Object[] r = Nms.join(name, prof, at);
                 Bot b = new Bot(name, r[0], (Player) r[1]);
+                b.spawnedAt = ticks;
                 b.p.setGameMode(gm == null ? GameMode.SURVIVAL : gm);
                 bots.put(name.toLowerCase(Locale.ROOT), b);
                 saveBots();
@@ -74,6 +78,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         Location s = l.clone(); s.setY(y); return s;
     }
     void remove(Bot b, String why) {
+        b.removing = true;
         bots.remove(b.name.toLowerCase(Locale.ROOT));
         if (store.b("clear-on-remove")) { b.p.getInventory().clear(); }
         Nms.remove(b.nms, why);
@@ -81,7 +86,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     }
     void saveBots() {
         YamlConfiguration y = new YamlConfiguration();
-        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); }
+        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); }
         try { y.save(new File(getDataFolder(), "bots.yml")); } catch (Exception ignored) {}
     }
     void restore() {
@@ -89,8 +94,8 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         int i = 0;
         for (String n : y.getKeys(false)) {
             Location l = Store.parse(y.getString(n + ".loc", "")); if (l == null) continue;
-            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL"));
-            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; } }), 5L * i++);
+            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets");
+            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); } }), 5L * i++);
         }
         if (i > 0) getLogger().info("Restoring " + i + " bots");
     }
@@ -102,6 +107,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         for (Bot b : new ArrayList<>(bots.values())) {
             try {
                 if (!b.p.isOnline()) { bots.remove(b.name.toLowerCase(Locale.ROOT)); continue; }
+                if (ticks % 20 == 0) Nms.keepAlive(b.nms);
                 if (b.p.isDead()) continue;
                 boolean manual = !b.acts.isEmpty() || b.manualForward != 0 || b.manualStrafe != 0;
                 if (manual) { manual(b); b.forward = b.manualForward; b.strafe = b.manualStrafe; b.jump = b.acts.containsKey("jump") && !b.acts.get("jump").once; }
@@ -173,7 +179,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
                 case "stop" -> { b.acts.clear(); b.manualForward = b.manualStrafe = 0; b.mining = null; b.p.setSneaking(false); b.p.setSprinting(false); s.sendMessage("§a" + b.name + " stopped."); }
                 case "attack", "use", "jump", "drop", "dropstack" -> { b.acts.put(act, mode(a, 2)); if (act.equals("attack")) b.mining = null; }
                 case "look" -> look(b, a);
-                case "turn" -> { String d = a.length > 2 ? a[2].toLowerCase(Locale.ROOT) : "back"; b.p.setRotation(b.p.getLocation().getYaw() + (d.equals("left") ? -90 : d.equals("right") ? 90 : 180), b.p.getLocation().getPitch()); }
+                case "turn" -> { String d = a.length > 2 ? a[2].toLowerCase(Locale.ROOT) : "back"; rot(b, b.p.getLocation().getYaw() + (d.equals("left") ? -90 : d.equals("right") ? 90 : 180), b.p.getLocation().getPitch()); }
                 case "move" -> { String d = a.length > 2 ? a[2].toLowerCase(Locale.ROOT) : "stop"; b.manualForward = d.equals("forward") ? 1 : d.equals("backward") ? -1 : 0; b.manualStrafe = d.equals("left") ? 1 : d.equals("right") ? -1 : 0; }
                 case "sneak" -> b.p.setSneaking(true);
                 case "unsneak" -> b.p.setSneaking(false);
@@ -197,11 +203,11 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         if (a.length < 3) return;
         Location l = b.p.getLocation();
         switch (a[2].toLowerCase(Locale.ROOT)) {
-            case "north" -> b.p.setRotation(180, 0); case "south" -> b.p.setRotation(0, 0);
-            case "east" -> b.p.setRotation(-90, 0); case "west" -> b.p.setRotation(90, 0);
-            case "up" -> b.p.setRotation(l.getYaw(), -90); case "down" -> b.p.setRotation(l.getYaw(), 90);
+            case "north" -> rot(b, 180, 0); case "south" -> rot(b, 0, 0);
+            case "east" -> rot(b, -90, 0); case "west" -> rot(b, 90, 0);
+            case "up" -> rot(b, l.getYaw(), -90); case "down" -> rot(b, l.getYaw(), 90);
             case "at" -> brain.face(b, new Location(l.getWorld(), Double.parseDouble(a[3]) + 0.5, Double.parseDouble(a[4]) + 0.5, Double.parseDouble(a[5]) + 0.5), 360);
-            default -> b.p.setRotation(Float.parseFloat(a[2]), a.length > 3 ? Float.parseFloat(a[3]) : 0);
+            default -> rot(b, Float.parseFloat(a[2]), a.length > 3 ? Float.parseFloat(a[3]) : 0);
         }
     }
     void spawnCmd(CommandSender s, String name, String[] a) {
@@ -220,6 +226,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         s.sendMessage("§7Spawning " + name + "...");
         spawn(name, where, gm, s, b -> { if (b != null) s.sendMessage("§a" + name + " joined."); });
     }
+    static void rot(Bot b, float yaw, float pitch) { Nms.rotate(b.nms, yaw, pitch); }
     static double coord(String v, double base) { return v.startsWith("~") ? base + (v.length() > 1 ? Double.parseDouble(v.substring(1)) : 0) : Double.parseDouble(v); }
 
     @Override public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
@@ -256,7 +263,40 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         if (store.b("bot-leave-on-death")) { Bukkit.getScheduler().runTaskLater(this, () -> remove(b, "Died"), 2L); return; }
         Bukkit.getScheduler().runTaskLater(this, () -> { try { b.p.spigot().respawn(); } catch (Throwable ignored) {} }, 20L);
     }
-    @EventHandler public void onQuit(PlayerQuitEvent e) { bots.remove(e.getPlayer().getName().toLowerCase(Locale.ROOT)); }
+    @EventHandler public void onQuit(PlayerQuitEvent e) {
+        Bot b = bot(e.getPlayer().getName());
+        if (b != null && !b.removing) getLogger().warning("Bot " + b.name + " left on its own (" + e.getReason() + ")");
+        bots.remove(e.getPlayer().getName().toLowerCase(Locale.ROOT));
+    }
+    /** bots never get kicked (timeouts, spam, flying checks...). Our own /pvpbot remove doesn't go through kicks. */
+    @EventHandler(priority = EventPriority.HIGHEST)
+    public void onKick(org.bukkit.event.player.PlayerKickEvent e) {
+        Bot b = bot(e.getPlayer().getName());
+        if (b == null || b.removing) return;
+        e.setCancelled(true);
+        if (ticks - b.lastKickLog > 200) { b.lastKickLog = ticks; getLogger().info("Blocked a kick for bot " + b.name + ": " + org.bukkit.ChatColor.stripColor(e.getReason())); }
+    }
+    /** no cramming deaths when lots of bots stand together, and no suffocation/fall damage right after spawning */
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    public void onHurt(org.bukkit.event.entity.EntityDamageEvent e) {
+        if (!(e.getEntity() instanceof Player p)) return;
+        Bot b = bot(p.getName()); if (b == null) return;
+        var c = e.getCause();
+        if (c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.CRAMMING) { e.setCancelled(true); return; }
+        if (ticks - b.spawnedAt < 100 && (c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.SUFFOCATION || c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.FALL)) e.setCancelled(true);
+    }
+    /** vanilla undoes melee knockback on players (their client is supposed to apply it). Bots have no client, so we apply it. */
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)
+    public void onKnockback(EntityDamageByEntityEvent e) {
+        if (!store.b("knockback") || !(e.getEntity() instanceof Player v) || !(e.getDamager() instanceof Player a)) return;
+        Bot b = bot(v.getName()); if (b == null) return;
+        var c = e.getCause();
+        if (c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_ATTACK && c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_SWEEP_ATTACK) return;
+        double ax = a.getLocation().getX(), az = a.getLocation().getZ(); float yaw = a.getLocation().getYaw();
+        boolean sprint = a.isSprinting() && c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_ATTACK;
+        int kb = a.getInventory().getItemInMainHand().getEnchantmentLevel(org.bukkit.enchantments.Enchantment.KNOCKBACK);
+        Bukkit.getScheduler().runTask(this, () -> brain.knockback(b, ax, az, yaw, sprint, kb));
+    }
 
     // ================================================================= names
     static final String[] A = {"Dark", "Shadow", "Crimson", "Frost", "Storm", "Iron", "Night", "Blaze", "Void", "Silent", "Swift", "Ghost", "Wolf", "Raven", "Steel", "Ash"};
@@ -264,7 +304,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     String randomName() {
         for (int k = 0; k < 50; k++) {
             String n = store.b("special-names") ? A[rnd.nextInt(A.length)] + B[rnd.nextInt(B.length)] + (rnd.nextInt(3) == 0 ? "" + rnd.nextInt(100) : "") : "Bot" + (1000 + rnd.nextInt(9000));
-            if (n.length() <= 16 && bot(n) == null && Bukkit.getPlayerExact(n) == null) return n;
+            if (n.length() <= 16 && bot(n) == null && Bukkit.getPlayerExact(n) == null && !pending.contains(n.toLowerCase(Locale.ROOT))) return n;
         }
         return "Bot" + System.nanoTime() % 100000;
     }

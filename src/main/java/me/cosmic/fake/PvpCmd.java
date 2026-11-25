@@ -46,6 +46,8 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                 }
                 case "attack" -> { Bot b = need(s, a, 1); Entity t = entity(a[2]); if (b == null) return true; if (t == null) { s.sendMessage(R + "No target " + a[2]); return true; } b.forced = t.getUniqueId(); s.sendMessage(G + b.name + " attacks " + a[2]); }
                 case "stop-attack" -> { Bot b = need(s, a, 1); if (b != null) { b.forced = null; b.revenge = null; s.sendMessage(G + b.name + " stopped attacking"); } }
+                case "target", "targets" -> target(s, a);
+                case "difficulty", "skill" -> difficulty(s, a);
                 case "faction" -> faction(s, a);
                 case "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random" -> kit(s, a, 0);
                 case "kit" -> kit(s, a, 1);
@@ -56,6 +58,56 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         } catch (ArrayIndexOutOfBoundsException e) { s.sendMessage(R + "Missing arguments. /pvpbot for help"); }
         catch (NumberFormatException e) { s.sendMessage(R + "That needs a number"); }
         return true;
+    }
+    /** bot name, "all", or a faction name */
+    List<Bot> pick(CommandSender s, String sel) {
+        List<Bot> out = new ArrayList<>();
+        if (sel.equalsIgnoreCase("all")) out.addAll(pl.bots.values());
+        else if (pl.bot(sel) != null) out.add(pl.bot(sel));
+        else { Store.Faction f = st.factions.get(sel.toLowerCase(Locale.ROOT)); if (f != null) for (String m : f.members) { Bot b = pl.bot(m); if (b != null) out.add(b); } }
+        if (out.isEmpty()) s.sendMessage(R + "No bots match " + sel + " (use a bot name, all, or a faction)");
+        return out;
+    }
+    void target(CommandSender s, String[] a) {
+        if (a.length < 3) { s.sendMessage(Y + "/pvpbot target <bot|all|faction> add <player...> | remove <player> | clear | list"); return; }
+        List<Bot> bs = pick(s, a[1]); if (bs.isEmpty()) return;
+        String op = a[2].toLowerCase(Locale.ROOT);
+        switch (op) {
+            case "add", "set" -> {
+                if (a.length < 4) { s.sendMessage(R + "Name at least one player"); return; }
+                for (Bot b : bs) { if (op.equals("set")) b.targets.clear(); for (int i = 3; i < a.length; i++) if (!a[i].equalsIgnoreCase(b.name)) b.targets.add(a[i]); }
+                s.sendMessage(G + bs.size() + " bot(s) now hunt: " + W + String.join(", ", Arrays.copyOfRange(a, 3, a.length)));
+            }
+            case "remove" -> { for (Bot b : bs) b.targets.removeIf(x -> x.equalsIgnoreCase(a[3])); s.sendMessage(G + "Removed " + a[3] + " from " + bs.size() + " bot(s)"); }
+            case "clear" -> { for (Bot b : bs) { b.targets.clear(); b.forced = null; b.revenge = null; } s.sendMessage(G + "Cleared targets of " + bs.size() + " bot(s)"); }
+            case "list" -> { for (Bot b : bs) s.sendMessage(Y + b.name + ": " + W + (b.targets.isEmpty() ? "none" : String.join(", ", b.targets))); }
+            default -> { // shortcut: /pvpbot target <bot> <player...>
+                for (Bot b : bs) for (int i = 2; i < a.length; i++) if (!a[i].equalsIgnoreCase(b.name)) b.targets.add(a[i]);
+                s.sendMessage(G + bs.size() + " bot(s) now hunt: " + W + String.join(", ", Arrays.copyOfRange(a, 2, a.length)));
+            }
+        }
+        pl.saveBots();
+    }
+    static int level(String v) {
+        return switch (v.toLowerCase(Locale.ROOT)) {
+            case "noob", "easy", "lt5" -> 15; case "lt4" -> 30; case "normal", "medium", "lt3" -> 50; case "ht3" -> 60;
+            case "hard", "lt2" -> 70; case "ht2" -> 80; case "lt1" -> 90; case "ht1", "pro", "max" -> 100;
+            default -> Integer.parseInt(v);
+        };
+    }
+    void difficulty(CommandSender s, String[] a) {
+        if (a.length < 3) {
+            s.sendMessage(Y + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|lt5..ht1|reset>");
+            s.sendMessage(D + "Default for new bots: " + W + st.i("skill"));
+            return;
+        }
+        if (a[1].equalsIgnoreCase("default")) { String err = st.setSetting("skill", String.valueOf(level(a[2]))); s.sendMessage(err != null ? R + err : G + "Default difficulty: " + W + st.i("skill")); return; }
+        List<Bot> bs = pick(s, a[1]); if (bs.isEmpty()) return;
+        int v = a[2].equalsIgnoreCase("reset") ? -1 : level(a[2]);
+        if (v != -1 && (v < 1 || v > 100)) { s.sendMessage(R + "1-100"); return; }
+        for (Bot b : bs) b.skill = v;
+        pl.saveBots();
+        s.sendMessage(G + "Difficulty of " + bs.size() + " bot(s): " + W + (v == -1 ? "default (" + st.i("skill") + ")" : v));
     }
     List<String> names() { List<String> l = new ArrayList<>(); for (Bot b : pl.bots.values()) l.add(b.name); return l; }
     Bot need(CommandSender s, String[] a, int i) { Bot b = pl.bot(a[i]); if (b == null) s.sendMessage(R + a[i] + " is not a bot"); return b; }
@@ -212,6 +264,8 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         s.sendMessage(Y + "§lPvP Bots");
         s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | reload");
         s.sendMessage(D + "/pvpbot attack <bot> <target> | stop-attack <bot>");
+        s.sendMessage(D + "/pvpbot target <bot|all|faction> add|set|remove|clear|list [players...]");
+        s.sendMessage(D + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|reset>");
         s.sendMessage(D + "/pvpbot faction list|create|delete|info|add|remove|add-near|add-all|hostile|attack|give|tp|path|kit");
         s.sendMessage(D + "/pvpbot create-kit|delete-kit|kits|give-kit|give-kit-near|give-kit-near-random");
         s.sendMessage(D + "/pvpbot path create|delete|add-point|remove-point|clear|list|info|loop|walk-type|show|start|stop|distribute|start-near|stop-all");
@@ -226,7 +280,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         if (a.length > 1 && a[0].equalsIgnoreCase("bot-management")) { if (a.length == 2) { out.addAll(List.of("list", "inventory", "mass-spawn", "attack", "stop-attack")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         if (a.length > 1 && a[0].equalsIgnoreCase("kit")) { if (a.length == 2) { out.addAll(List.of("create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         String a0 = a[0].toLowerCase(Locale.ROOT);
-        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "attack", "stop-attack", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
+        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "attack", "stop-attack", "target", "difficulty", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
         else if (a.length == 2) switch (a0) {
             case "remove", "inventory", "attack", "stop-attack" -> out.addAll(bots);
             case "faction" -> out.addAll(List.of("list", "create", "delete", "info", "add", "remove", "add-near", "add-all", "hostile", "attack", "give", "tp", "path", "kit"));
@@ -263,6 +317,12 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             default -> {}
         }
         else if (a.length >= 5 && a0.equals("faction")) { if (a[1].equalsIgnoreCase("path")) out.addAll(paths); else if (a[1].equalsIgnoreCase("kit")) out.addAll(kits); else if (a[1].equalsIgnoreCase("hostile")) out.addAll(List.of("true", "false")); }
+        if (a0.equals("target") || a0.equals("difficulty")) {
+            out.clear();
+            if (a.length == 2) { out.addAll(bots); out.add("all"); out.addAll(facs); if (a0.equals("difficulty")) out.add("default"); }
+            else if (a.length == 3) out.addAll(a0.equals("target") ? List.of("add", "set", "remove", "clear", "list") : List.of("easy", "normal", "hard", "ht1", "lt5", "lt4", "lt3", "ht3", "lt2", "ht2", "lt1", "reset", "50", "100"));
+            else if (a0.equals("target")) out.addAll(players);
+        }
         String last = a[a.length - 1].toLowerCase(Locale.ROOT);
         out.removeIf(x -> !x.toLowerCase(Locale.ROOT).startsWith(last));
         return out;
