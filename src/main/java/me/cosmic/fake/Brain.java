@@ -488,7 +488,7 @@ final class Brain {
         // a tick later: cart on the rail, then the arrow
         Bukkit.getScheduler().runTaskLater(pl, () -> {
             if (!p.isOnline() || p.isDead() || !rail.getType().name().endsWith("RAIL")) return;
-            ExplosiveMinecart cart = rail.getWorld().spawn(rail.getLocation().add(0.5, 0.1, 0.5), ExplosiveMinecart.class);
+            org.bukkit.entity.minecart.ExplosiveMinecart cart = rail.getWorld().spawn(rail.getLocation().add(0.5, 0.1, 0.5), org.bukkit.entity.minecart.ExplosiveMinecart.class);
             take(inv, Material.TNT_MINECART); p.swingMainHand();
             hold(p, s -> s.getType() == (crossbow ? Material.CROSSBOW : Material.BOW));
             Location eye = p.getEyeLocation(); Vector to = cart.getLocation().add(0, 0.3, 0).toVector().subtract(eye.toVector());
