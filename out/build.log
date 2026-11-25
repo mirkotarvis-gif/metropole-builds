@@ -10,6 +10,7 @@ Here are the highlights of this release:
 For more details see https://docs.gradle.org/8.14.3/release-notes.html
 
 Starting a Gradle Daemon (subsequent builds will be faster)
+
 > Task :compileJava
 Note: /home/runner/work/metropole-builds/metropole-builds/src/main/java/me/nick/NickPlugin.java uses or overrides a deprecated API.
 Note: Recompile with -Xlint:deprecation for details.
@@ -17,9 +18,9 @@ Note: Recompile with -Xlint:deprecation for details.
 > Task :processResources
 > Task :classes
 > Task :jar
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1795631672324.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1795631882612.json
 
 [Incubating] Problems report is available at: file:///home/runner/work/metropole-builds/metropole-builds/build/reports/problems/problems-report.html
 
-BUILD SUCCESSFUL in 3m 5s
+BUILD SUCCESSFUL in 24s
 3 actionable tasks: 3 executed
