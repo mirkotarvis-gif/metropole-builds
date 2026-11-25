@@ -1,0 +1,21 @@
+name: NickPlugin
+version: 1.4.0
+main: me.nick.NickPlugin
+api-version: '1.21'
+description: Nicknames (TAB, chat, death/join/leave/advancement messages, floating name tag) + random real-account nicks and skins.
+commands:
+  nick:
+    description: Nick a player or clear a nick
+    usage: /nick <player> <newname> | /nick clear <player>
+    permission: nick.use
+  randomizenick:
+    description: Give players a random real Minecraft name + skin
+    usage: /randomizenick [player] | clear | bypass <player> | bypass list
+    permission: nick.use
+permissions:
+  nick.use:
+    description: Use /nick and /randomizenick
+    default: op
+  randomnick.bypass:
+    description: /randomizenick won't change this player
+    default: false
