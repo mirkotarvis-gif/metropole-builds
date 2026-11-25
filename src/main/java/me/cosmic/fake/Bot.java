@@ -10,7 +10,7 @@ import java.util.UUID;
 
 /** one fake player and everything its brain remembers */
 final class Bot {
-    final String name; final Object nms; Player p;
+    final String name; Object nms; Player p;
     Bot(String name, Object nms, Player p) { this.name = name; this.nms = nms; this.p = p; this.home = p.getLocation(); }
 
     // ---- manual (/player) actions
@@ -37,4 +37,5 @@ final class Bot {
     final java.util.LinkedHashSet<String> targets = new java.util.LinkedHashSet<>();
     int tapTicks, webTicks; long stunAt = -1, lastPearl, lastGap, maceSeen, retotemAt, spawnedAt;
     boolean critPlan, antiMace, removing; long lastKickLog = -1000;
+    org.bukkit.util.Vector tVel = new org.bukkit.util.Vector(); Location tLast; java.util.UUID tId; int webBreak;
 }

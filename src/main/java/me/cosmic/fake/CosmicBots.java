@@ -36,10 +36,19 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         getCommand("pvpbot").setExecutor(pvp); getCommand("pvpbot").setTabCompleter(pvp);
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 1L, 1L);
         Bukkit.getScheduler().runTaskLater(this, this::restore, 60L);
-        getLogger().info("CosmicBots 2.1 ready: /player and /pvpbot");
+        getLogger().info("CosmicBots 2.2 ready: /player and /pvpbot");
     }
     @Override public void onDisable() { saveBots(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
 
+    /** a player by real name, or by the name they show (nicknames) */
+    Player findPlayer(String n) {
+        Player p = Bukkit.getPlayerExact(n); if (p != null) return p;
+        for (Player o : Bukkit.getOnlinePlayers()) {
+            String dn = ChatColor.stripColor(o.getDisplayName()), ln = o.getPlayerListName() == null ? null : ChatColor.stripColor(o.getPlayerListName());
+            if (n.equalsIgnoreCase(dn) || n.equalsIgnoreCase(ln)) return o;
+        }
+        return null;
+    }
     boolean isBot(Player p) { return bots.containsKey(p.getName().toLowerCase(Locale.ROOT)); }
     Bot bot(String n) { return n == null ? null : bots.get(n.toLowerCase(Locale.ROOT)); }
 
@@ -48,7 +57,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done) {
         if (!name.matches("[A-Za-z0-9_]{3,16}")) { if (tell != null) tell.sendMessage("§cNames are 3-16 letters, numbers or _"); if (done != null) done.accept(null); return; }
         if (bot(name) != null || Bukkit.getPlayerExact(name) != null || pending.contains(name.toLowerCase(Locale.ROOT))) { if (tell != null) tell.sendMessage("§c" + name + " is already online."); if (done != null) done.accept(null); return; }
-        if (store.b("safe-spawn")) where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1));
+        if (store.b("safe-spawn")) { where.getChunk().load(); where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1)); }
         final Location at = where;
         pending.add(name.toLowerCase(Locale.ROOT));
         Runnable join = null;
@@ -72,10 +81,20 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         else Bukkit.getScheduler().runTaskAsynchronously(this, () -> finish.accept(Nms.profile(name)));
     }
     Location safe(Location l) {
-        World w = l.getWorld(); Block b = l.getBlock();
-        if (b.isPassable() && b.getRelative(0, 1, 0).isPassable() && !b.getRelative(0, -1, 0).isPassable()) return l;
+        World w = l.getWorld();
+        for (int dy = 0; dy <= 12; dy++) for (int sgn : new int[]{-1, 1}) {
+            int y = l.getBlockY() + dy * sgn; if (y <= w.getMinHeight() || y >= w.getMaxHeight() - 2) continue;
+            Block b = w.getBlockAt(l.getBlockX(), y, l.getBlockZ());
+            if (ok(b)) { Location s = l.clone(); s.setY(y); return s; }
+            if (dy == 0) break;
+        }
         int y = w.getHighestBlockYAt(l.getBlockX(), l.getBlockZ()) + 1;
         Location s = l.clone(); s.setY(y); return s;
+    }
+    static boolean ok(Block b) {
+        Block below = b.getRelative(0, -1, 0);
+        return b.isPassable() && !b.isLiquid() && b.getType() != Material.COBWEB && b.getRelative(0, 1, 0).isPassable() && !b.getRelative(0, 1, 0).isLiquid()
+                && below.getType().isSolid() && below.getType() != Material.MAGMA_BLOCK && below.getType() != Material.CACTUS;
     }
     void remove(Bot b, String why) {
         b.removing = true;
@@ -86,7 +105,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     }
     void saveBots() {
         YamlConfiguration y = new YamlConfiguration();
-        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); }
+        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); if (b.forced != null) y.set(b.name + ".forced", b.forced.toString()); }
         try { y.save(new File(getDataFolder(), "bots.yml")); } catch (Exception ignored) {}
     }
     void restore() {
@@ -94,8 +113,8 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         int i = 0;
         for (String n : y.getKeys(false)) {
             Location l = Store.parse(y.getString(n + ".loc", "")); if (l == null) continue;
-            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets");
-            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); } }), 5L * i++);
+            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets"); String fo = y.getString(n + ".forced");
+            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); try { if (fo != null) b.forced = UUID.fromString(fo); } catch (Exception ignored) {} } }), 5L * i++);
         }
         if (i > 0) getLogger().info("Restoring " + i + " bots");
     }
@@ -259,9 +278,15 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     @EventHandler(priority = EventPriority.MONITOR)
     public void onDeath(PlayerDeathEvent e) {
         Bot b = bot(e.getEntity().getName()); if (b == null) return;
-        b.forced = null; b.revenge = null; b.blocking = false;
+        b.revenge = null; b.blocking = false; b.antiMace = false; b.stunAt = -1; b.tapTicks = 0; b.eatTicks = 0; // targets + /pvpbot attack are kept
+        if (ticks - b.spawnedAt < 200) getLogger().warning("Bot " + b.name + " died right after spawning: " + e.getDeathMessage());
         if (store.b("bot-leave-on-death")) { Bukkit.getScheduler().runTaskLater(this, () -> remove(b, "Died"), 2L); return; }
-        Bukkit.getScheduler().runTaskLater(this, () -> { try { b.p.spigot().respawn(); } catch (Throwable ignored) {} }, 20L);
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            try { b.p.spigot().respawn(); } catch (Throwable ignored) {}
+            Player np = Bukkit.getPlayer(b.p.getUniqueId());
+            if (np != null) { b.p = np; try { b.nms = Nms.invoke(np, "getHandle"); } catch (Throwable ignored) {} }
+            b.spawnedAt = ticks;
+        }, 20L);
     }
     @EventHandler public void onQuit(PlayerQuitEvent e) {
         Bot b = bot(e.getPlayer().getName());
@@ -283,7 +308,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         Bot b = bot(p.getName()); if (b == null) return;
         var c = e.getCause();
         if (c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.CRAMMING) { e.setCancelled(true); return; }
-        if (ticks - b.spawnedAt < 100 && (c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.SUFFOCATION || c == org.bukkit.event.entity.EntityDamageEvent.DamageCause.FALL)) e.setCancelled(true);
+        if (ticks - b.spawnedAt < 100 && c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_ATTACK && c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.ENTITY_SWEEP_ATTACK && c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.PROJECTILE && c != org.bukkit.event.entity.EntityDamageEvent.DamageCause.KILL) e.setCancelled(true);
     }
     /** vanilla undoes melee knockback on players (their client is supposed to apply it). Bots have no client, so we apply it. */
     @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = true)

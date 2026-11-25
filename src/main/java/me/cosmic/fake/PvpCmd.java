@@ -35,12 +35,16 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                     int n = Integer.parseInt(a[1]); int max = st.i("max-mass-spawn");
                     if (n < 1 || n > max) { s.sendMessage(R + "1-" + max + " (change with /pvpbot settings max-mass-spawn)"); return true; }
                     Location base = s instanceof Player p ? p.getLocation() : Bukkit.getWorlds().get(0).getSpawnLocation();
+                    int[] ok = {0}, bad = {0};
                     for (int i = 0; i < n; i++) {
                         final int k = i;
                         Bukkit.getScheduler().runTaskLater(pl, () -> {
                             double an = k * 2.4, r = 2 + Math.sqrt(k) * 1.6;
-                            pl.spawn(pl.randomName(), base.clone().add(Math.cos(an) * r, 0, Math.sin(an) * r), GameMode.SURVIVAL, null, null);
-                        }, 3L * i);
+                            pl.spawn(pl.randomName(), base.clone().add(Math.cos(an) * r, 0, Math.sin(an) * r), GameMode.SURVIVAL, null, b -> {
+                                if (b != null) ok[0]++; else bad[0]++;
+                                if (ok[0] + bad[0] == n) s.sendMessage(G + "Mass spawn done: " + W + ok[0] + G + " online" + (bad[0] > 0 ? R + ", " + bad[0] + " failed (see console)" : "") + D + " | bots online now: " + pl.bots.size());
+                            });
+                        }, 2L * i);
                     }
                     s.sendMessage(G + "Spawning " + n + " bots...");
                 }
@@ -253,13 +257,26 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             s.sendMessage(D + "/pvpbot settings <name> <value>");
             return;
         }
-        if (a.length == 2) { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT));
-            if (v instanceof Boolean bo) { st.setSetting(a[1].toLowerCase(Locale.ROOT), String.valueOf(!bo)); s.sendMessage(G + a[1] + " = " + !bo); return; }
-            s.sendMessage(v == null ? R + "Unknown setting" : Y + a[1] + " = " + W + v); return; }
-        String err = st.setSetting(a[1].toLowerCase(Locale.ROOT), a[2]);
-        s.sendMessage(err != null ? R + err : G + a[1] + " = " + a[2]);
+        String k = a[1].toLowerCase(Locale.ROOT);
+        if (a.length == 2) { Object v = st.set.get(k);
+            if (v instanceof Boolean bo) { st.setSetting(k, String.valueOf(!bo)); s.sendMessage(G + k + " = " + (!bo ? "on" : R + "off")); hint(s, k); return; }
+            s.sendMessage(v == null ? R + "Unknown setting " + k + D + " (/pvpbot settings to list them)" : Y + k + " = " + W + Store.fmt(((Number) v).doubleValue()) + D + "  (" + Store.fmt(Store.RANGE.get(k)[0]) + "-" + Store.fmt(Store.RANGE.get(k)[1]) + ", default " + Store.fmt(((Number) Store.DEFAULTS.get(k)).doubleValue()) + ")"); return; }
+        String v = a[2].toLowerCase(Locale.ROOT);
+        if (v.equals("on") || v.equals("yes") || v.equals("enable")) v = "true";
+        if (v.equals("off") || v.equals("no") || v.equals("disable")) v = "false";
+        if (v.equals("default") || v.equals("reset")) v = Store.DEFAULTS.containsKey(k) ? (Store.DEFAULTS.get(k) instanceof Boolean bo ? String.valueOf(bo) : Store.fmt(((Number) Store.DEFAULTS.get(k)).doubleValue())) : v;
+        String err = st.setSetting(k, v);
+        if (err != null) { s.sendMessage(R + err); return; }
+        Object now = st.set.get(k);
+        s.sendMessage(G + k + " = " + W + (now instanceof Boolean bo ? (bo ? "on" : R + "off") : Store.fmt(((Number) now).doubleValue())));
+        hint(s, k);
     }
 
+    void hint(CommandSender s, String k) {
+        if (k.startsWith("target-") && !st.b("auto-target"))
+            s.sendMessage(D + "Note: target-players/bots/mobs only matter when " + W + "auto-target" + D + " is on (/pvpbot settings auto-target on)");
+        if (k.equals("auto-target") && st.b("auto-target")) s.sendMessage(D + "Bots now attack anyone nearby that matches target-players / target-bots / target-mobs");
+    }
     void help(CommandSender s) {
         s.sendMessage(Y + "§lPvP Bots");
         s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | reload");
@@ -295,7 +312,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             case "faction" -> out.addAll(facs);
             case "give-kit" -> { out.addAll(kits); out.addAll(players); }
             case "path" -> { if (a[1].equalsIgnoreCase("stop")) out.addAll(bots); else out.addAll(paths); }
-            case "settings" -> { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT)); if (v instanceof Boolean) out.addAll(List.of("true", "false")); }
+            case "settings" -> { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT)); if (v instanceof Boolean) out.addAll(List.of("on", "off")); else if (v instanceof Number nn) { out.add(Store.fmt(nn.doubleValue())); out.add("default"); } }
             default -> {}
         }
         else if (a.length == 4) switch (a0) {

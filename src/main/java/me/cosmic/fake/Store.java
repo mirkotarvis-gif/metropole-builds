@@ -19,17 +19,17 @@ final class Store {
     static final LinkedHashMap<String, Object> DEFAULTS = new LinkedHashMap<>();
     static final Map<String, double[]> RANGE = new HashMap<>();
     static {
-        for (String k : new String[]{"auto-armor", "auto-weapon", "combat", "revenge", "target-players", "target-bots", "criticals", "ranged", "mace", "crystal-pvp", "anchor-pvp",
+        for (String k : new String[]{"auto-armor", "auto-weapon", "combat", "revenge", "target-players", "criticals", "ranged", "mace", "crystal-pvp", "anchor-pvp",
                 "retreat", "auto-totem", "totem-priority", "auto-shield", "shield-break", "shield-mace", "prefer-sword", "auto-eat", "auto-potion", "auto-mend", "bhop",
                 "safe-spawn", "clear-on-remove", "arrow-prediction", "ranged-strafe", "ranged-retreat", "cobwebs",
                 "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls"}) DEFAULTS.put(k, true);
-        for (String k : new String[]{"drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names", "bot-leave-on-death",
+        for (String k : new String[]{"target-bots", "drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names", "bot-leave-on-death",
                 "attack-invincible", "profile-lagg-fix"}) DEFAULTS.put(k, false);
         num("interval", 1, 1, 100); num("attack-cooldown", 10, 1, 40); num("crit-fall-ticks", 3, 1, 10); num("shield-hold-ticks", 40, 10, 200);
         num("shield-raise-ticks", 5, 2, 40); num("bow-draw-ticks", 22, 5, 100); num("melee-range", 3.0, 2, 6); num("move-speed", 1.0, 0.1, 2.0);
         num("view-distance", 32, 5, 128); num("aim-speed", 30, 3, 90); num("drop-distance", 3, 1, 10); num("idle-radius", 10, 3, 50);
         num("shield-break-chance", 80, 0, 100); num("miss-chance", 8, 0, 100); num("mistake-chance", 5, 0, 100);
-        num("ranged-min-range", 6, 3, 20); num("ranged-optimal-range", 18, 10, 50); num("ranged-max-range", 40, 15, 100); num("max-mass-spawn", 50, 50, 10000); num("skill", 70, 1, 100);
+        num("ranged-min-range", 6, 3, 20); num("ranged-optimal-range", 18, 10, 50); num("ranged-max-range", 40, 15, 100); num("max-mass-spawn", 50, 1, 10000); num("skill", 70, 1, 100);
     }
     static void num(String k, double v, double lo, double hi) { DEFAULTS.put(k, v); RANGE.put(k, new double[]{lo, hi}); }
     final Map<String, Object> set = new LinkedHashMap<>(DEFAULTS);
@@ -71,7 +71,12 @@ final class Store {
     // ================================================================ load / save
     void load() {
         YamlConfiguration s = YamlConfiguration.loadConfiguration(new File(dir, "settings.yml"));
-        for (String k : DEFAULTS.keySet()) if (s.contains(k)) set.put(k, DEFAULTS.get(k) instanceof Boolean ? (Object) s.getBoolean(k) : (Object) s.getDouble(k));
+        for (String k : DEFAULTS.keySet()) if (s.contains(k)) {
+            if (DEFAULTS.get(k) instanceof Boolean) { String v = String.valueOf(s.get(k)).toLowerCase(); set.put(k, v.equals("true") || v.equals("on") || v.equals("yes")); }
+            else { double x = s.getDouble(k, ((Number) DEFAULTS.get(k)).doubleValue()); double[] r = RANGE.get(k); set.put(k, Math.max(r[0], Math.min(r[1], x))); }
+        }
+        // v2.2: bots from a mass-spawn were killing each other right away; bots no longer target other bots unless you turn it on
+        if (s.getInt("config-version", 1) < 2) { set.put("target-bots", false); saveSettings(); }
         YamlConfiguration f = YamlConfiguration.loadConfiguration(new File(dir, "factions.yml"));
         factions.clear();
         for (String k : f.getKeys(false)) { Faction fa = new Faction(k); fa.members.addAll(f.getStringList(k + ".members")); for (String h : f.getStringList(k + ".hostile")) fa.hostile.add(h.toLowerCase()); factions.put(k.toLowerCase(), fa); }
@@ -87,7 +92,7 @@ final class Store {
             paths.put(k.toLowerCase(), p);
         }
     }
-    void saveSettings() { YamlConfiguration s = new YamlConfiguration(); set.forEach(s::set); try { s.save(new File(dir, "settings.yml")); } catch (Exception ignored) {} }
+    void saveSettings() { YamlConfiguration s = new YamlConfiguration(); s.set("config-version", 2); set.forEach(s::set); try { s.save(new File(dir, "settings.yml")); } catch (Exception ignored) {} }
     void saveFactions() {
         YamlConfiguration f = new YamlConfiguration();
         for (Faction fa : factions.values()) { f.set(fa.name + ".members", new ArrayList<>(fa.members)); f.set(fa.name + ".hostile", new ArrayList<>(fa.hostile)); }

@@ -37,6 +37,8 @@ final class Brain {
     // =================================================================== main tick
     void tick(Bot b, long now) {
         Player p = b.p;
+        int every = Math.max(1, st.i("interval"));
+        if (every > 1 && (now + b.name.hashCode()) % every != 0) { b.jump = false; return; } // keep last move, think later
         b.forward = 0; b.strafe = 0; b.jump = false;
         if (now % 10 == 0) upkeep(b, now);
         retotem(b, now);
@@ -65,7 +67,7 @@ final class Brain {
         if (!b.targets.isEmpty()) {
             LivingEntity best = null; double bd = 1e9;
             for (String n : b.targets) {
-                Player o = Bukkit.getPlayerExact(n); if (o == null || !valid(b, o, vd * 4, true)) continue;
+                Player o = pl.findPlayer(n); if (o == null || !valid(b, o, vd * 4, true)) continue;
                 double d = dist(p, o); if (d < bd) { bd = d; best = o; }
             }
             if (best != null) return best;
@@ -96,8 +98,21 @@ final class Brain {
     }
 
     // =================================================================== fighting
+    /** the target's real speed, measured from its position each tick */
+    void track(Bot b, LivingEntity t) {
+        Location l = t.getLocation();
+        if (t.getUniqueId().equals(b.tId) && b.tLast != null && b.tLast.getWorld().equals(l.getWorld())) {
+            Vector now = l.toVector().subtract(b.tLast.toVector());
+            if (now.lengthSquared() > 25) now.zero();
+            b.tVel = b.tVel.multiply(0.5).add(now.multiply(0.5));
+        } else b.tVel = new Vector();
+        b.tId = t.getUniqueId(); b.tLast = l.clone();
+    }
+    Vector vel(Bot b, LivingEntity t) { return t instanceof Player o && !pl.isBot(o) ? b.tVel.clone() : t.getVelocity().clone(); }
+
     void fight(Bot b, LivingEntity t, long now) {
         Player p = b.p; double d = dist(p, t);
+        track(b, t);
         double hp = p.getHealth(), max = maxHp(p);
         if (antiMace(b, t, now)) return;
         PlayerInventory inv = p.getInventory();
@@ -115,7 +130,7 @@ final class Brain {
             if (away.lengthSquared() < 0.01) away = new Vector(1, 0, 0);
             face(b, p.getLocation().clone().add(away.normalize().multiply(5)).add(0, 1.6, 0), aimStep(b) * 2);
             run(b, true, now);
-            if (st.b("auto-shield") && hasOff(p, Material.SHIELD) && d < 4) shield(b, now, 20);
+            if (st.b("auto-shield") && d < 4) shield(b, now, 20);
             return;
         }
         // pick a fighting style
@@ -167,7 +182,7 @@ final class Brain {
             b.stunAt = -1;
             hold(p, has(p.getInventory(), Material.MACE) && !st.b("prefer-sword") ? (s -> s.getType() == Material.MACE) : swordFirst());
             face(b, t.getLocation().clone().add(0, t.getHeight() * 0.75, 0), 180);
-            if (d <= range + 0.4) { b.lastAttack = now; p.attack(t); p.swingMainHand(); }
+            if (d <= range + 0.4 && blocker(b, t) == null) { b.lastAttack = now; p.attack(t); p.swingMainHand(); }
             if (st.b("stun-web") && roll(sk * 100)) webUnder(b, t, now);
             return;
         }
@@ -177,9 +192,9 @@ final class Brain {
         if (st.b("auto-weapon")) hold(p, breakShield ? axe() : weapon());
         aim(b, t, now);
         // shields: block an incoming swing, a falling mace, or when low
-        if (hasOff(p, Material.SHIELD) && p.getCooldown(Material.SHIELD) == 0) {
+        if ((hasOff(p, Material.SHIELD) || (st.b("auto-shield") && has(p.getInventory(), Material.SHIELD))) && p.getCooldown(Material.SHIELD) == 0) {
             boolean danger = t instanceof Player o && d < range + 0.5 && o.getAttackCooldown() > 0.9f && rnd.nextInt(5) == 0;
-            boolean maceDrop = st.b("shield-mace") && t instanceof Player o2 && o2.getInventory().getItemInMainHand().getType() == Material.MACE && o2.getVelocity().getY() < -0.3 && t.getLocation().getY() > p.getLocation().getY() + 1.5;
+            boolean maceDrop = st.b("shield-mace") && t instanceof Player o2 && o2.getInventory().getItemInMainHand().getType() == Material.MACE && !o2.isOnGround() && vel(b, t).getY() < -0.1 && t.getLocation().getY() > p.getLocation().getY() + 1.5;
             boolean low = st.b("auto-shield") && p.getHealth() < maxHp(p) * 0.4;
             if ((danger || maceDrop || low) && !b.blocking) shield(b, now, st.i("shield-hold-ticks"));
         }
@@ -219,8 +234,28 @@ final class Brain {
         if (d < range + 2) b.strafe = (float) (0.2 + 0.4 * skill(b)) * b.strafeDir;
     }
 
+    /** like a real crosshair: a web or wall between us and them eats the click */
+    Block blocker(Bot b, LivingEntity t) {
+        Location eye = b.p.getEyeLocation();
+        Block first = null;
+        for (double f : new double[]{0.85, 0.5, 0.2}) {
+            Location aimAt = t.getLocation().clone().add(0, t.getHeight() * f, 0);
+            Vector dir = aimAt.toVector().subtract(eye.toVector()); double len = dir.length(); if (len < 0.05) return null;
+            org.bukkit.util.RayTraceResult r = eye.getWorld().rayTraceBlocks(eye, dir.normalize(), len, FluidCollisionMode.NEVER, false);
+            Block hb = r == null ? null : r.getHitBlock();
+            if (hb == null || !(hb.getType() == Material.COBWEB || hb.getType().isOccluding())) return null; // clear shot at this part of them
+            if (first == null) first = hb;
+        }
+        return first;
+    }
     void hit(Bot b, LivingEntity t, long now) {
-        Player p = b.p; b.lastAttack = now;
+        Player p = b.p;
+        Block wall = blocker(b, t);
+        if (wall != null) { // can't hit through it: cut the web like a player would, otherwise just swing
+            if (wall.getType() == Material.COBWEB && wall.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) < 4.5) breakWeb(b, wall, now);
+            return;
+        }
+        b.lastAttack = now;
         double miss = st.d("miss-chance") * (1.6 - 1.4 * skill(b));
         if (roll(miss)) { p.swingMainHand(); return; }
         p.attack(t); p.swingMainHand();
@@ -228,7 +263,9 @@ final class Brain {
 
     void shield(Bot b, long now, int ticks) {
         if (b.blocking) return;
-        Nms.startUsing(b.nms, true); b.blocking = true; b.shieldUntil = now + Math.max(ticks, st.i("shield-raise-ticks"));
+        Player p = b.p;
+        if (hasOff(p, Material.SHIELD)) Nms.startUsing(b.nms, true);
+        else { int sl = slotOf(p.getInventory(), s -> s.getType() == Material.SHIELD); if (sl < 0) return; toHand(p, sl); Nms.startUsing(b.nms, false); } b.blocking = true; b.shieldUntil = now + Math.max(ticks, st.i("shield-raise-ticks"));
     }
 
     // ------------------------------------------------------------------- knockback (vanilla resets it for players; we put it back)
@@ -259,7 +296,8 @@ final class Brain {
         Block web = feet.getType() == Material.COBWEB ? feet : head.getType() == Material.COBWEB ? head : null;
         if (web == null) { b.webTicks = 0; return false; }
         PlayerInventory inv = p.getInventory();
-        if (!st.b("web-escape") || !has(inv, Material.WATER_BUCKET)) return false;
+        if (!st.b("web-escape")) return false;
+        if (!has(inv, Material.WATER_BUCKET)) { if (++b.webTicks >= 2 + react(b)) { breakWeb(b, web, now); return true; } return false; }
         if (++b.webTicks < 2 + react(b)) return false;
         b.webTicks = 0;
         if (b.blocking) { Nms.stopUsing(b.nms); b.blocking = false; b.antiMace = false; }
@@ -310,10 +348,26 @@ final class Brain {
         p.swingMainHand();
     }
 
+    /** the block at their feet, only if they're standing on something solid (no webs in mid-air) */
+    static Block feetSpot(LivingEntity t) {
+        Block f = t.getLocation().getBlock();
+        if (!f.getType().isAir()) return null;
+        Block below = f.getRelative(0, -1, 0);
+        if (!below.getType().isSolid() || t.getLocation().getY() - f.getY() > 0.3) return null;
+        return f;
+    }
+    void breakWeb(Bot b, Block w, long now) {
+        Player p = b.p;
+        face(b, w.getLocation().add(0.5, 0.5, 0.5), 180);
+        boolean sword = p.getInventory().getItemInMainHand().getType().name().endsWith("_SWORD") || p.getInventory().getItemInMainHand().getType() == Material.SHEARS;
+        if (!sword) hold(p, s -> s.getType().name().endsWith("_SWORD") || s.getType() == Material.SHEARS);
+        p.swingMainHand();
+        if (++b.webBreak >= (sword ? 4 : 18)) { b.webBreak = 0; p.breakBlock(w); }
+    }
     void webUnder(Bot b, LivingEntity t, long now) {
         if (!has(b.p.getInventory(), Material.COBWEB)) return;
-        Block f = t.getLocation().getBlock();
-        if (!f.getType().isAir()) return;
+        Block f = feetSpot(t);
+        if (f == null) return;
         f.setType(Material.COBWEB); take(b.p.getInventory(), Material.COBWEB); b.p.swingMainHand(); b.lastCobweb = now;
     }
 
@@ -326,7 +380,7 @@ final class Brain {
         double opt = st.d("ranged-optimal-range");
         if (d < opt - 3 && st.b("ranged-retreat")) b.forward = -1; else if (d > opt + 4) { b.forward = 1; run(b, d > opt + 10, now); }
         if (st.b("ranged-strafe")) { if (now > b.strafeSwitch) { b.strafeDir = -b.strafeDir; b.strafeSwitch = now + 25 + rnd.nextInt(40); } b.strafe = 0.8f * b.strafeDir; }
-        Location aimAt = lead(p, t, d);
+        Location aimAt = lead(b, t, d);
         face(b, aimAt, st.d("aim-speed"));
         if (bow) {
             if (!Nms.isUsing(b.nms)) { Nms.startUsing(b.nms, false); b.drawTicks = 0; }
@@ -339,11 +393,11 @@ final class Brain {
         }
     }
     /** where to aim: the target's chest, moved forward by its speed and raised for the arrow drop */
-    Location lead(Player p, LivingEntity t, double d) {
+    Location lead(Bot b, LivingEntity t, double d) {
         Location l = t.getLocation().clone().add(0, t.getHeight() * 0.6, 0);
         if (st.b("arrow-prediction")) {
             double ticks = d / 2.6;
-            Vector v = t.getVelocity().clone(); v.setY(Math.max(v.getY(), -0.1));
+            Vector v = vel(b, t); v.setY(Math.max(v.getY(), -0.1));
             l.add(v.multiply(ticks));
             l.add(0, 0.012 * ticks * ticks + d * 0.012, 0);
         }
@@ -411,8 +465,8 @@ final class Brain {
     }
     void cobweb(Bot b, LivingEntity t, long now) {
         if (now - b.lastCobweb < 200 || !has(b.p.getInventory(), Material.COBWEB)) return;
-        Block f = t.getLocation().getBlock();
-        if (f.getType().isAir()) { f.setType(Material.COBWEB); take(b.p.getInventory(), Material.COBWEB); b.p.swingMainHand(); b.lastCobweb = now; }
+        Block f = feetSpot(t);
+        if (f != null) { f.setType(Material.COBWEB); take(b.p.getInventory(), Material.COBWEB); b.p.swingMainHand(); b.lastCobweb = now; }
     }
 
     // =================================================================== upkeep (every 10 ticks)
