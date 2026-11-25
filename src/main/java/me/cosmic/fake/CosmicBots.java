@@ -55,7 +55,8 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
 
     // ================================================================= spawn / remove / persistence
     /** spawn a bot; done is called on the main thread with the bot or null */
-    void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done) {
+    void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done) { spawn(name, where, gm, tell, done, true); }
+    void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done, boolean fresh) {
         if (!name.matches("[A-Za-z0-9_]{3,16}")) { if (tell != null) tell.sendMessage("§cNames are 3-16 letters, numbers or _"); if (done != null) done.accept(null); return; }
         if (bot(name) != null || Bukkit.getPlayerExact(name) != null || pending.contains(name.toLowerCase(Locale.ROOT))) { if (tell != null) tell.sendMessage("§c" + name + " is already online."); if (done != null) done.accept(null); return; }
         if (store.b("safe-spawn")) { where.getChunk().load(); where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1)); }
@@ -73,6 +74,9 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
                 b.p.setGameMode(gm == null ? GameMode.SURVIVAL : gm);
                 bots.put(name.toLowerCase(Locale.ROOT), b);
                 saveBots();
+                // give fresh bots a random real-looking nickname + skin (NickPlugin)
+                if (fresh && store.b("random-nick") && Bukkit.getPluginManager().isPluginEnabled("NickPlugin"))
+                    Bukkit.getScheduler().runTaskLater(this, () -> { if (b.p.isOnline()) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "randomizenick " + b.name); }, 5L);
                 if (done != null) done.accept(b);
             } catch (Throwable t) {
                 if (tell != null) tell.sendMessage("§cCouldn't spawn " + name + ": " + t);
@@ -128,7 +132,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         for (String n : y.getKeys(false)) {
             Location l = Store.parse(y.getString(n + ".loc", "")); if (l == null) continue;
             Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets"); String fo = y.getString(n + ".forced");
-            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); try { if (fo != null) b.forced = UUID.fromString(fo); } catch (Exception ignored) {} } }), 5L * i++);
+            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); try { if (fo != null) b.forced = UUID.fromString(fo); } catch (Exception ignored) {} } }, false), 5L * i++);
         }
         if (i > 0) getLogger().info("Restoring " + i + " bots");
     }
