@@ -18,6 +18,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
 
     @Override public boolean onCommand(CommandSender s, Command c, String label, String[] a) {
         if (a.length == 0) { help(s); return true; }
+        if (a[0].equalsIgnoreCase("bot-management") && a.length > 1) a = Arrays.copyOfRange(a, 1, a.length);
         try {
             switch (a[0].toLowerCase(Locale.ROOT)) {
                 case "spawn" -> {
@@ -31,8 +32,8 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                 case "list" -> s.sendMessage(Y + "Bots (" + pl.bots.size() + "): " + W + (pl.bots.isEmpty() ? "none" : String.join(", ", names())));
                 case "inventory" -> { Bot b = need(s, a, 1); if (b != null && s instanceof Player p) p.openInventory(b.p.getInventory()); }
                 case "mass-spawn" -> {
-                    int n = Integer.parseInt(a[1]); int max = Math.min(50, st.i("max-mass-spawn"));
-                    if (n < 1 || n > Math.max(max, 50)) { s.sendMessage(R + "1-" + Math.max(max, 50)); return true; }
+                    int n = Integer.parseInt(a[1]); int max = st.i("max-mass-spawn");
+                    if (n < 1 || n > max) { s.sendMessage(R + "1-" + max + " (change with /pvpbot settings max-mass-spawn)"); return true; }
                     Location base = s instanceof Player p ? p.getLocation() : Bukkit.getWorlds().get(0).getSpawnLocation();
                     for (int i = 0; i < n; i++) {
                         final int k = i;
@@ -88,7 +89,11 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                 s.sendMessage(G + f.name + " and " + o.name + (on ? " are now enemies" : " are at peace"));
             }
             case "attack" -> { Entity t = entity(a[3]); if (t == null) { s.sendMessage(R + "No target"); return; } int n = 0; for (String m : f.members) { Bot b = pl.bot(m); if (b != null) { b.forced = t.getUniqueId(); n++; } } s.sendMessage(G + n + " bots attack " + a[3]); }
-            case "give" -> { if (!(s instanceof Player p)) return; ItemStack it = p.getInventory().getItemInMainHand(); if (it.getType().isAir()) { s.sendMessage(R + "Hold the item to give"); return; } int n = 0; for (String m : f.members) { Bot b = pl.bot(m); if (b != null) { b.p.getInventory().addItem(it.clone()); n++; } } s.sendMessage(G + "Gave " + it.getType() + " x" + it.getAmount() + " to " + n + " bots"); }
+            case "give" -> {
+                ItemStack it = null;
+                if (a.length > 3) { org.bukkit.Material m = org.bukkit.Material.matchMaterial(a[3]); if (m == null || !m.isItem()) { s.sendMessage(R + "Unknown item " + a[3]); return; } it = new ItemStack(m, a.length > 4 ? Math.max(1, Integer.parseInt(a[4])) : 1); }
+                else if (s instanceof Player p) it = p.getInventory().getItemInMainHand().clone();
+                if (it == null || it.getType().isAir()) { s.sendMessage(R + "/pvpbot faction give <faction> <item> [amount] (or hold the item)"); return; } int n = 0; for (String m : f.members) { Bot b = pl.bot(m); if (b != null) { b.p.getInventory().addItem(it.clone()); n++; } } s.sendMessage(G + "Gave " + it.getType() + " x" + it.getAmount() + " to " + n + " bots"); }
             case "tp" -> {
                 Location to;
                 if (a.length >= 6) { Location base = s instanceof Player p ? p.getLocation() : Bukkit.getWorlds().get(0).getSpawnLocation(); to = new Location(base.getWorld(), CosmicBots.coord(a[3], base.getX()), CosmicBots.coord(a[4], base.getY()), CosmicBots.coord(a[5], base.getZ())); }
@@ -119,9 +124,11 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             case "delete-kit" -> { st.kits.remove(a[o + 1].toLowerCase(Locale.ROOT)); st.saveKits(); s.sendMessage(G + "Deleted kit " + a[o + 1]); }
             case "kits" -> s.sendMessage(Y + "Kits: " + W + (st.kits.isEmpty() ? "none" : String.join(", ", st.kits.keySet())));
             case "give-kit" -> {
-                ItemStack[] k = st.kits.get(a[o + 1].toLowerCase(Locale.ROOT)); if (k == null) { s.sendMessage(R + "No kit " + a[o + 1]); return; }
-                Player t = Bukkit.getPlayerExact(a[o + 2]); if (t == null) { s.sendMessage(R + "No player/bot " + a[o + 2]); return; }
-                giveKit(t, k); s.sendMessage(G + "Gave " + a[o + 1] + " to " + t.getName());
+                String x = a[o + 1], y = a[o + 2];
+                String kn = st.kits.containsKey(x.toLowerCase(Locale.ROOT)) ? x : y, pn = kn == x ? y : x;
+                ItemStack[] k = st.kits.get(kn.toLowerCase(Locale.ROOT)); if (k == null) { s.sendMessage(R + "No kit " + kn); return; }
+                Player t = Bukkit.getPlayerExact(pn); if (t == null) { s.sendMessage(R + "No player/bot " + pn); return; }
+                giveKit(t, k); s.sendMessage(G + "Gave " + kn + " to " + t.getName());
             }
             case "give-kit-near" -> { ItemStack[] k = st.kits.get(a[o + 1].toLowerCase(Locale.ROOT)); if (k == null) { s.sendMessage(R + "No kit"); return; } double r = a.length > o + 2 ? Double.parseDouble(a[o + 2]) : 20; List<Bot> l = near(s, r); for (Bot b : l) giveKit(b.p, k); s.sendMessage(G + "Gave " + a[o + 1] + " to " + l.size() + " bots"); }
             case "give-kit-near-random" -> { double r = Double.parseDouble(a[o + 1]); List<Bot> l = near(s, r); for (Bot b : l) giveRandom(b.p, Arrays.copyOfRange(a, o + 2, a.length)); s.sendMessage(G + "Gave random kits to " + l.size() + " bots"); }
@@ -132,7 +139,14 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
     /** args like  pvp:3 archer:1 tank  (name:weight, weight defaults to 1) */
     void giveRandom(Player p, String[] spec) {
         List<String> ks = new ArrayList<>(); List<Double> ws = new ArrayList<>(); double tot = 0;
-        for (String x : spec) { String[] q = x.split(":"); if (!st.kits.containsKey(q[0].toLowerCase(Locale.ROOT))) continue; double w = q.length > 1 ? Double.parseDouble(q[1]) : 1; ks.add(q[0].toLowerCase(Locale.ROOT)); ws.add(w); tot += w; }
+        for (int i = 0; i < spec.length; i++) {
+            String[] q = spec[i].split(":"); String kn = q[0].toLowerCase(Locale.ROOT);
+            if (!st.kits.containsKey(kn)) continue;
+            double w = 1;
+            if (q.length > 1) w = Double.parseDouble(q[1].replace("%", ""));
+            else if (i + 1 < spec.length && spec[i + 1].replace("%", "").matches("[0-9.]+")) w = Double.parseDouble(spec[++i].replace("%", ""));
+            ks.add(kn); ws.add(w); tot += w;
+        }
         if (ks.isEmpty()) return;
         double r = pl.rnd.nextDouble() * tot;
         for (int i = 0; i < ks.size(); i++) { r -= ws.get(i); if (r <= 0) { giveKit(p, st.kits.get(ks.get(i))); return; } }
@@ -143,8 +157,9 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
     void path(CommandSender s, String[] a) {
         String sub = a[1].toLowerCase(Locale.ROOT);
         if (sub.equals("list")) { s.sendMessage(Y + "Paths: " + W + (st.paths.isEmpty() ? "none" : String.join(", ", st.paths.keySet()))); return; }
-        if (sub.equals("stop-all")) { for (Bot b : pl.bots.values()) b.path = null; s.sendMessage(G + "All bots stopped walking"); return; }
+        if (sub.equals("stop-all")) { int n = 0; for (Bot b : pl.bots.values()) if (b.path != null && (a.length < 3 || a[2].equalsIgnoreCase(b.path))) { b.path = null; n++; } s.sendMessage(G + n + " bots stopped walking"); return; }
         if (sub.equals("stop")) { Bot b = need(s, a, 2); if (b != null) { b.path = null; s.sendMessage(G + b.name + " stopped"); } return; }
+        if (sub.equals("start") && a.length > 3 && !st.paths.containsKey(a[2].toLowerCase(Locale.ROOT)) && st.paths.containsKey(a[3].toLowerCase(Locale.ROOT))) { String t = a[2]; a[2] = a[3]; a[3] = t; }
         String pn = a[2]; Store.PathDef pd = st.paths.get(pn.toLowerCase(Locale.ROOT));
         if (sub.equals("create")) { if (pd != null) { s.sendMessage(R + "Exists"); return; } st.paths.put(pn.toLowerCase(Locale.ROOT), new Store.PathDef(pn)); st.savePaths(); s.sendMessage(G + "Created path " + pn + D + " — stand on spots and use /pvpbot path add-point " + pn); return; }
         if (pd == null) { s.sendMessage(R + "No path " + pn); return; }
@@ -155,7 +170,8 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             case "clear" -> { pd.points.clear(); s.sendMessage(G + "Cleared " + pn); }
             case "info" -> { s.sendMessage(Y + pd.name + D + " points " + W + pd.points.size() + D + ", loop " + W + pd.loop + D + ", walk " + W + pd.walk + D + ", show " + W + pd.show);
                              for (int i = 0; i < pd.points.size(); i++) { Location l = pd.points.get(i); s.sendMessage(D + " #" + (i + 1) + " " + l.getBlockX() + " " + l.getBlockY() + " " + l.getBlockZ()); } }
-            case "loop" -> { String v = a[3].toLowerCase(Locale.ROOT); if (!List.of("none", "backforth", "circle").contains(v)) { s.sendMessage(R + "none|backforth|circle"); return; } pd.loop = v; s.sendMessage(G + "Loop: " + v); }
+            case "loop" -> { String v = a[3].toLowerCase(Locale.ROOT); if (v.equals("true")) v = "circle"; if (v.equals("false")) v = "none";
+                if (!List.of("none", "backforth", "circle").contains(v)) { s.sendMessage(R + "true|false|backforth|circle"); return; } pd.loop = v; s.sendMessage(G + "Loop: " + v); }
             case "walk-type" -> { String v = a[3].toLowerCase(Locale.ROOT); if (!List.of("walk", "sprint", "bhop").contains(v)) { s.sendMessage(R + "walk|sprint|bhop"); return; } pd.walk = v; s.sendMessage(G + "Walk type: " + v); }
             case "show" -> { pd.show = a.length > 3 ? Boolean.parseBoolean(a[3]) : !pd.show; s.sendMessage(G + "Show: " + pd.show); }
             case "start" -> { Bot b = need(s, a, 3); if (b != null) { b.path = pd.name; b.pathIdx = 0; b.pathDir = 1; s.sendMessage(G + b.name + " walks " + pd.name); } }
@@ -185,7 +201,9 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             s.sendMessage(D + "/pvpbot settings <name> <value>");
             return;
         }
-        if (a.length == 2) { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT)); s.sendMessage(v == null ? R + "Unknown setting" : Y + a[1] + " = " + W + v); return; }
+        if (a.length == 2) { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT));
+            if (v instanceof Boolean bo) { st.setSetting(a[1].toLowerCase(Locale.ROOT), String.valueOf(!bo)); s.sendMessage(G + a[1] + " = " + !bo); return; }
+            s.sendMessage(v == null ? R + "Unknown setting" : Y + a[1] + " = " + W + v); return; }
         String err = st.setSetting(a[1].toLowerCase(Locale.ROOT), a[2]);
         s.sendMessage(err != null ? R + err : G + a[1] + " = " + a[2]);
     }
@@ -205,12 +223,15 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         List<String> out = new ArrayList<>();
         List<String> bots = names(), facs = new ArrayList<>(st.factions.keySet()), kits = new ArrayList<>(st.kits.keySet()), paths = new ArrayList<>(st.paths.keySet());
         List<String> players = new ArrayList<>(); for (Player p : Bukkit.getOnlinePlayers()) players.add(p.getName());
+        if (a.length > 1 && a[0].equalsIgnoreCase("bot-management")) { if (a.length == 2) { out.addAll(List.of("list", "inventory", "mass-spawn", "attack", "stop-attack")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
+        if (a.length > 1 && a[0].equalsIgnoreCase("kit")) { if (a.length == 2) { out.addAll(List.of("create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         String a0 = a[0].toLowerCase(Locale.ROOT);
-        if (a.length == 1) out.addAll(List.of("spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "attack", "stop-attack", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
+        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "attack", "stop-attack", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
         else if (a.length == 2) switch (a0) {
             case "remove", "inventory", "attack", "stop-attack" -> out.addAll(bots);
             case "faction" -> out.addAll(List.of("list", "create", "delete", "info", "add", "remove", "add-near", "add-all", "hostile", "attack", "give", "tp", "path", "kit"));
-            case "delete-kit", "give-kit", "give-kit-near" -> out.addAll(kits);
+            case "delete-kit", "give-kit-near" -> out.addAll(kits);
+            case "give-kit" -> { out.addAll(kits); out.addAll(players); }
             case "path" -> out.addAll(List.of("create", "delete", "add-point", "remove-point", "clear", "list", "info", "loop", "walk-type", "show", "start", "stop", "distribute", "start-near", "stop-all"));
             case "settings" -> out.addAll(st.set.keySet());
             default -> {}
@@ -218,7 +239,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         else if (a.length == 3) switch (a0) {
             case "attack" -> out.addAll(players);
             case "faction" -> out.addAll(facs);
-            case "give-kit" -> out.addAll(players);
+            case "give-kit" -> { out.addAll(kits); out.addAll(players); }
             case "path" -> { if (a[1].equalsIgnoreCase("stop")) out.addAll(bots); else out.addAll(paths); }
             case "settings" -> { Object v = st.set.get(a[1].toLowerCase(Locale.ROOT)); if (v instanceof Boolean) out.addAll(List.of("true", "false")); }
             default -> {}

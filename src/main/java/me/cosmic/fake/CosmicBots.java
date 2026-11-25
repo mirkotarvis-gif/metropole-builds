@@ -47,7 +47,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     void spawn(String name, Location where, GameMode gm, CommandSender tell, Consumer<Bot> done) {
         if (!name.matches("[A-Za-z0-9_]{3,16}")) { if (tell != null) tell.sendMessage("§cNames are 3-16 letters, numbers or _"); if (done != null) done.accept(null); return; }
         if (bot(name) != null || Bukkit.getPlayerExact(name) != null) { if (tell != null) tell.sendMessage("§c" + name + " is already online."); if (done != null) done.accept(null); return; }
-        if (store.b("safe-spawn")) where = safe(where);
+        if (store.b("safe-spawn")) where = safe(where.clone().add(rnd.nextDouble() * 2 - 1, 0, rnd.nextDouble() * 2 - 1));
         final Location at = where;
         Runnable join = null;
         Consumer<Object> finish = prof -> Bukkit.getScheduler().runTask(this, () -> {

@@ -252,6 +252,9 @@ final class Brain {
         if (st.b("drop-weapon")) dropWorse(p, s -> s.getType().name().endsWith("_SWORD"));
         if (st.b("drop-weapon")) dropWorse(p, s -> s.getType().name().endsWith("_AXE"));
         boolean calm = nearestEnemy(b) > 6;
+        // pick up dropped items within drop-distance
+        double pr = st.d("drop-distance");
+        for (Entity e : p.getNearbyEntities(pr, 2, pr)) if (e instanceof Item it && it.getPickupDelay() <= 0 && calm) it.teleport(p.getLocation());
         // eat
         if (st.b("auto-eat") && b.eatTicks == 0 && calm && (p.getFoodLevel() < 17 || (p.getHealth() < maxHp(p) * 0.6 && p.getFoodLevel() < 20))) {
             int slot = bestFood(inv, p.getHealth() < maxHp(p) * 0.5);
