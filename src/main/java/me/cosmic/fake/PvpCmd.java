@@ -224,21 +224,21 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             default -> {}
         }
         else if (a.length == 4) switch (a0) {
-            case "faction" -> switch (a[1].toLowerCase(Locale.ROOT)) {
+            case "faction" -> { switch (a[1].toLowerCase(Locale.ROOT)) {
                 case "add", "remove" -> { out.addAll(bots); out.addAll(players); }
                 case "hostile" -> out.addAll(facs);
                 case "attack", "tp" -> out.addAll(players);
                 case "path" -> out.addAll(List.of("start", "stop"));
                 case "kit" -> out.addAll(List.of("give-kit", "give-kit-random"));
                 default -> {}
-            }
-            case "path" -> switch (a[1].toLowerCase(Locale.ROOT)) {
+            } }
+            case "path" -> { switch (a[1].toLowerCase(Locale.ROOT)) {
                 case "loop" -> out.addAll(List.of("none", "backforth", "circle"));
                 case "walk-type" -> out.addAll(List.of("walk", "sprint", "bhop"));
                 case "show" -> out.addAll(List.of("true", "false"));
                 case "start" -> out.addAll(bots);
                 default -> {}
-            }
+            } }
             default -> {}
         }
         else if (a.length >= 5 && a0.equals("faction")) { if (a[1].equalsIgnoreCase("path")) out.addAll(paths); else if (a[1].equalsIgnoreCase("kit")) out.addAll(kits); else if (a[1].equalsIgnoreCase("hostile")) out.addAll(List.of("true", "false")); }
