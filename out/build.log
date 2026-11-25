@@ -10,11 +10,17 @@ Here are the highlights of this release:
 For more details see https://docs.gradle.org/8.14.3/release-notes.html
 
 Starting a Gradle Daemon (subsequent builds will be faster)
+
 > Task :compileJava
+Note: Some input files use or override a deprecated API.
+Note: Recompile with -Xlint:deprecation for details.
+
 > Task :processResources
 > Task :classes
 > Task :jar
-gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1795631078102.json
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1795638726336.json
 
-BUILD SUCCESSFUL in 24s
+[Incubating] Problems report is available at: file:///home/runner/work/metropole-builds/metropole-builds/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 25s
 3 actionable tasks: 3 executed
