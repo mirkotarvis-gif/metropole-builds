@@ -29,10 +29,12 @@ final class Brain {
     // =================================================================== skill
     /** 0.01 - 1.0 : how good this bot is (per bot, else the global 'skill' setting) */
     double skill(Bot b) { int s = b.skill > 0 ? b.skill : st.i("skill"); return Math.max(1, Math.min(100, s)) / 100.0; }
+    /** difficulty 'marlowww' (101): combat grandmaster, no misses, no delay, every trick */
+    boolean god(Bot b) { return (b.skill > 0 ? b.skill : st.i("skill")) >= 101; }
     boolean roll(double pct) { return rnd.nextDouble() * 100 < pct; }
     /** reaction delay in ticks: 0 for HT1, ~8 for a beginner */
-    int react(Bot b) { return (int) Math.round((1 - skill(b)) * 8); }
-    double aimStep(Bot b) { return st.d("aim-speed") * (0.3 + 0.9 * skill(b)); }
+    int react(Bot b) { return god(b) ? 0 : (int) Math.round((1 - skill(b)) * 8); }
+    double aimStep(Bot b) { return god(b) ? 120 : st.d("aim-speed") * (0.3 + 0.9 * skill(b)); }
 
     // =================================================================== main tick
     void tick(Bot b, long now) {
@@ -44,6 +46,7 @@ final class Brain {
         retotem(b, now);
         if (webEscape(b, now)) return;
         LivingEntity t = st.b("combat") ? target(b, now) : null;
+        b.curTarget = t == null ? null : t.getUniqueId();
         if (b.eatTicks > 0) {
             b.eatTicks--;
             if (!Nms.isUsing(b.nms)) b.eatTicks = 0;
@@ -73,6 +76,16 @@ final class Brain {
             if (best != null) return best;
         }
         if (b.revenge != null && st.b("revenge") && now - b.revengeAt < 300) { Entity e = Bukkit.getEntity(b.revenge); if (e instanceof LivingEntity le && valid(b, le, vd, true)) return le; }
+        // teamwork: help a teammate who is already fighting
+        if (st.b("teamwork")) {
+            LivingEntity help = null; double hd = 1e9;
+            for (Bot o : pl.bots.values()) {
+                if (o == b || o.curTarget == null || !team(b, o) || !o.p.getWorld().equals(p.getWorld()) || dist(p, o.p) > 24) continue;
+                Entity e = Bukkit.getEntity(o.curTarget);
+                if (e instanceof LivingEntity le && !(le instanceof Player lp && pl.isBot(lp) && team(b, pl.bot(lp.getName()))) && valid(b, le, vd, true)) { double dd = dist(p, le); if (dd < hd) { hd = dd; help = le; } }
+            }
+            if (help != null) return help;
+        }
         LivingEntity best = null; double bd = 1e9;
         for (Entity e : p.getNearbyEntities(vd, vd, vd)) {
             if (!(e instanceof LivingEntity le) || !valid(b, le, vd, false)) continue;
@@ -86,6 +99,19 @@ final class Brain {
             double d = dist(p, le); if (d < bd) { bd = d; best = le; }
         }
         return best;
+    }
+    /** same faction, or both without a faction */
+    boolean team(Bot a, Bot c) {
+        if (a == null || c == null) return false;
+        Store.Faction fa = st.factionOf(a.name), fc = st.factionOf(c.name);
+        return fa == fc;
+    }
+    /** bots on our team fighting the same target, sorted by name so each one gets a fixed spot */
+    List<Bot> squad(Bot b, LivingEntity t) {
+        List<Bot> l = new ArrayList<>();
+        for (Bot o : pl.bots.values()) if (o == b || (t.getUniqueId().equals(o.curTarget) && team(b, o) && o.p.getWorld().equals(t.getWorld()) && dist(o.p, t) < 12)) l.add(o);
+        l.sort(Comparator.comparing(o -> o.name));
+        return l;
     }
     boolean valid(Bot b, LivingEntity e, double range, boolean ordered) {
         if (e.equals(b.p) || e.isDead() || !e.isValid() || e instanceof ArmorStand || !e.getWorld().equals(b.p.getWorld())) return false;
@@ -138,6 +164,10 @@ final class Brain {
         boolean canAnchor = st.b("anchor-pvp") && has(inv, Material.RESPAWN_ANCHOR) && has(inv, Material.GLOWSTONE) && p.getWorld().getEnvironment() != World.Environment.NETHER && d > 2.5 && d < 6;
         boolean canRanged = st.b("ranged") && (has(inv, Material.BOW) || has(inv, Material.CROSSBOW)) && hasArrows(inv) && d > st.d("ranged-min-range") && d < st.d("ranged-max-range");
         boolean canMace = st.b("mace") && has(inv, Material.MACE) && has(inv, Material.WIND_CHARGE) && d < 7;
+        boolean canCart = st.b("cart-pvp") && skill(b) >= 0.5 && has(inv, s -> s.getType().name().endsWith("RAIL")) && has(inv, Material.TNT_MINECART)
+                && (has(inv, Material.BOW) || has(inv, Material.CROSSBOW)) && hasArrows(inv) && d > 2.8 && d < 9 && now - b.lastCart > (god(b) ? 40 : 80);
+        if (canCart && cart(b, t, now)) return;
+        if (st.b("fullbox") && d < 5 && webbed(t)) fullbox(b, t, now);
         if (canCrystal && now - b.lastCrystal > 12) { crystal(b, t, now); return; }
         if (canAnchor && now - b.lastAnchor > 25) { anchor(b, t, now); return; }
         if (canRanged && !(d < st.d("melee-range") + 1)) { ranged(b, t, d, now); return; }
@@ -212,7 +242,14 @@ final class Brain {
         boolean ready = p.getAttackCooldown() >= need && now - b.lastAttack >= st.i("attack-cooldown");
         if (!ready) return;
         // crit spam: jump, hit on the way down
-        if (b.critWait < 0) b.critPlan = st.b("criticals") && !breakShield && (st.b("crit-spam") ? roll(25 + 75 * sk) : roll(30 * sk)) && !p.isInWater();
+        if (b.critWait < 0) {
+            // crit spam unless they're running away (then sprint-hit + s-tap to keep up)
+            Vector tv = vel(b, t); Vector away = t.getLocation().toVector().subtract(p.getLocation().toVector()).setY(0);
+            boolean fleeing = away.lengthSquared() > 0.01 && tv.clone().setY(0).dot(away.normalize()) > 0.12;
+            boolean webbedT = webbed(t);
+            double chance = god(b) ? (fleeing ? 25 : 100) : st.b("crit-spam") ? (fleeing ? 15 : 25 + 75 * sk) : 30 * sk;
+            b.critPlan = st.b("criticals") && !breakShield && !p.isInWater() && p.getLocation().getBlock().getType() != Material.COBWEB && (webbedT || roll(chance));
+        }
         if (b.critPlan) {
             if (b.critWait < 0) { if (Nms.onGround(b.nms)) { Nms.jumpNow(b.nms); b.critWait = st.i("crit-fall-ticks") + 6; } return; }
             b.critWait--;
@@ -228,10 +265,39 @@ final class Brain {
     }
 
     void approach(Bot b, LivingEntity t, double d, double range, long now) {
+        Player p = b.p; double sk = skill(b);
         if (d > range - 0.6) { b.forward = 1; run(b, d > 6, now); }
         else if (d < 1.2) b.forward = -0.5f;
-        if (d < range + 1 && rnd.nextInt(Math.max(8, (int) (50 - 30 * skill(b)))) == 0) b.strafeDir = -b.strafeDir;
-        if (d < range + 2) b.strafe = (float) (0.2 + 0.4 * skill(b)) * b.strafeDir;
+        else b.forward = (float) (rnd.nextDouble() * 0.6 - 0.2); // small random in/out steps instead of standing still
+        // strafe: random direction changes at random times, random strength
+        if (now >= b.nextStrafeFlip) {
+            if (rnd.nextInt(3) != 0) b.strafeDir = -b.strafeDir;
+            b.strafeAmt = (float) (0.25 + rnd.nextDouble() * (0.3 + 0.45 * sk));
+            b.nextStrafeFlip = now + 6 + rnd.nextInt(god(b) ? 18 : 30);
+        }
+        if (d < range + 2.5) b.strafe = b.strafeAmt * b.strafeDir;
+        // the odd random hop while circling
+        if (d < range + 2 && now >= b.nextHop && Nms.onGround(b.nms) && b.critWait < 0) { if (rnd.nextInt(4) == 0) b.jump = true; b.nextHop = now + 20 + rnd.nextInt(60); }
+        // teamwork: spread around the target instead of stacking on one side
+        if (st.b("teamwork") && d < range + 4) {
+            List<Bot> sq = squad(b, t);
+            if (sq.size() > 1) {
+                int idx = sq.indexOf(b);
+                double base = Math.atan2(sq.get(0).p.getLocation().getZ() - t.getLocation().getZ(), sq.get(0).p.getLocation().getX() - t.getLocation().getX());
+                double ang = base + idx * 2 * Math.PI / sq.size(), r = Math.max(1.8, range - 0.5);
+                Location spot = t.getLocation().clone().add(Math.cos(ang) * r, 0, Math.sin(ang) * r);
+                Vector go = spot.toVector().subtract(p.getLocation().toVector()).setY(0);
+                if (go.lengthSquared() > 0.6) {
+                    double yaw = Math.toRadians(p.getLocation().getYaw());
+                    double fwd = go.getX() * -Math.sin(yaw) + go.getZ() * Math.cos(yaw), left = go.getX() * Math.cos(yaw) + go.getZ() * Math.sin(yaw);
+                    double len = Math.max(Math.abs(fwd), Math.abs(left));
+                    b.forward = (float) Math.max(-1, Math.min(1, b.forward * 0.4 + fwd / len * 0.8));
+                    b.strafe = (float) Math.max(-1, Math.min(1, b.strafe * 0.3 + left / len * 0.9));
+                }
+                // don't stand right in front of a teammate's swing
+                for (Bot o : sq) if (o != b && dist(o.p, p) < 1.3) { b.strafe = b.strafeDir; break; }
+            }
+        }
     }
 
     /** like a real crosshair: a web or wall between us and them eats the click */
@@ -256,7 +322,7 @@ final class Brain {
             return;
         }
         b.lastAttack = now;
-        double miss = st.d("miss-chance") * (1.6 - 1.4 * skill(b));
+        double miss = god(b) ? 0 : st.d("miss-chance") * (1.6 - 1.4 * skill(b));
         if (roll(miss)) { p.swingMainHand(); return; }
         p.attack(t); p.swingMainHand();
     }
@@ -286,7 +352,7 @@ final class Brain {
             if (ground) vy = Math.min(0.4, vy / 2 + extra);
         }
         // jump reset: jump the moment you get hit to take less knockback
-        if (ground && st.b("jump-reset") && roll(85 * skill(b))) { vy = 0.42; vx *= 0.65; vz *= 0.65; }
+        if (ground && st.b("jump-reset") && (god(b) || roll(85 * skill(b)))) { vy = 0.42; vx *= 0.65; vz *= 0.65; }
         p.setVelocity(new Vector(vx, vy, vz));
     }
 
@@ -364,6 +430,82 @@ final class Brain {
         p.swingMainHand();
         if (++b.webBreak >= (sword ? 4 : 18)) { b.webBreak = 0; p.breakBlock(w); }
     }
+    static boolean webbed(LivingEntity t) {
+        Block f = t.getLocation().getBlock();
+        return f.getType() == Material.COBWEB || f.getRelative(0, 1, 0).getType() == Material.COBWEB;
+    }
+    static boolean buildBlock(ItemStack s) {
+        Material m = s.getType();
+        if (!m.isBlock() || !m.isSolid() || m.hasGravity() || m.isInteractable()) return false;
+        String n = m.name();
+        return m == Material.OBSIDIAN || m == Material.CRYING_OBSIDIAN || n.endsWith("_PLANKS") || n.contains("COBBLE") || n.endsWith("STONE") || n.endsWith("DEEPSLATE")
+                || m == Material.DIRT || m == Material.NETHERRACK || n.endsWith("_BRICKS") || n.equals("BLACKSTONE") || n.endsWith("TERRACOTTA") || n.endsWith("_CONCRETE");
+    }
+    /** they're stuck in a web: the closest teammate boxes them in (sides + roof), leaving our hitting side open at the feet */
+    void fullbox(Bot b, LivingEntity t, long now) {
+        Player p = b.p; PlayerInventory inv = p.getInventory();
+        if (now - b.lastBox < (god(b) ? 1 : 3) || !has(inv, Brain::buildBlock)) return;
+        for (Bot o : pl.bots.values()) if (o != b && t.getUniqueId().equals(o.curTarget) && team(b, o) && dist(o.p, t) < dist(p, t) - 0.3) return; // a closer teammate builds
+        Block f = t.getLocation().getBlock();
+        Vector me = p.getLocation().toVector().subtract(t.getLocation().toVector()).setY(0);
+        int ox = 0, oz = 0;
+        if (Math.abs(me.getX()) > Math.abs(me.getZ())) ox = me.getX() > 0 ? 1 : -1; else oz = me.getZ() > 0 ? 1 : -1;
+        int[][] sides = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        List<Block> want = new ArrayList<>();
+        for (int[] sd : sides) want.add(f.getRelative(sd[0], 1, sd[1]));          // head level, all sides
+        want.add(f.getRelative(0, 2, 0));                                        // roof
+        for (int[] sd : sides) if (sd[0] != ox || sd[1] != oz) want.add(f.getRelative(sd[0], 0, sd[1])); // feet level except our side
+        int placed = 0, max = god(b) ? 3 : 1;
+        for (Block w : want) {
+            if (placed >= max) break;
+            if (!(w.getType().isAir() || w.getType() == Material.WATER || w.getType() == Material.SHORT_GRASS)) continue;
+            if (w.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) > 4.6) continue;
+            if (!w.getWorld().getNearbyEntities(w.getBoundingBox(), e -> e instanceof LivingEntity).isEmpty()) continue;
+            int sl = slotOf(inv, s -> s.getType() == Material.OBSIDIAN); if (sl < 0) sl = slotOf(inv, Brain::buildBlock);
+            if (sl < 0) break;
+            ItemStack s = inv.getItem(sl);
+            w.setType(s.getType());
+            s.setAmount(s.getAmount() - 1); inv.setItem(sl, s.getAmount() > 0 ? s : null);
+            p.swingMainHand(); placed++;
+        }
+        if (placed > 0) b.lastBox = now;
+    }
+    /** crossbow cart / bow insta-cart: rail + TNT minecart at their feet, then a flaming arrow into it */
+    boolean cart(Bot b, LivingEntity t, long now) {
+        Player p = b.p; PlayerInventory inv = p.getInventory();
+        Block spot = feetSpot(t);
+        if (spot == null) { Block g = t.getLocation().getBlock(); Vector dir = p.getLocation().toVector().subtract(t.getLocation().toVector()).setY(0);
+            if (dir.lengthSquared() > 0.01) { dir.normalize(); Block n = g.getRelative((int) Math.round(dir.getX()), 0, (int) Math.round(dir.getZ())); if (n.getType().isAir() && n.getRelative(0, -1, 0).getType().isSolid()) spot = n; } }
+        if (spot == null || spot.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) > 5.5) return false;
+        b.lastCart = now;
+        boolean crossbow = has(inv, Material.CROSSBOW) && (!has(inv, Material.BOW) || rnd.nextBoolean());
+        int railSlot = slotOf(inv, s -> s.getType().name().endsWith("RAIL"));
+        Material railType = inv.getItem(railSlot).getType();
+        face(b, spot.getLocation().add(0.5, 0.2, 0.5), 180);
+        spot.setType(railType == Material.ACTIVATOR_RAIL || railType == Material.DETECTOR_RAIL || railType == Material.POWERED_RAIL ? railType : Material.RAIL);
+        take(inv, railType); p.swingMainHand();
+        final Block rail = spot;
+        // a tick later: cart on the rail, then the arrow
+        Bukkit.getScheduler().runTaskLater(pl, () -> {
+            if (!p.isOnline() || p.isDead() || !rail.getType().name().endsWith("RAIL")) return;
+            ExplosiveMinecart cart = rail.getWorld().spawn(rail.getLocation().add(0.5, 0.1, 0.5), ExplosiveMinecart.class);
+            take(inv, Material.TNT_MINECART); p.swingMainHand();
+            hold(p, s -> s.getType() == (crossbow ? Material.CROSSBOW : Material.BOW));
+            Location eye = p.getEyeLocation(); Vector to = cart.getLocation().add(0, 0.3, 0).toVector().subtract(eye.toVector());
+            float yaw = (float) Math.toDegrees(Math.atan2(-to.getX(), to.getZ())), pitch = (float) -Math.toDegrees(Math.atan2(to.getY(), Math.hypot(to.getX(), to.getZ())));
+            look(b, yaw, pitch);
+            Arrow ar = p.launchProjectile(Arrow.class, to.normalize().multiply(crossbow ? 3.15 : 3.0));
+            ar.setFireTicks(200); ar.setPickupStatus(AbstractArrow.PickupStatus.CREATIVE_ONLY);
+            takeArrow(inv);
+            // if the arrow somehow misses, the cart still goes off (like a flame hit would)
+            Bukkit.getScheduler().runTaskLater(pl, () -> { if (cart.isValid()) cart.explode(); }, 4L);
+        }, god(b) ? 1L : 2L + rnd.nextInt(2));
+        return true;
+    }
+    static void takeArrow(PlayerInventory inv) {
+        for (int i = 0; i < 36; i++) { ItemStack s = inv.getItem(i); if (s != null && s.getType().name().endsWith("ARROW")) { s.setAmount(s.getAmount() - 1); inv.setItem(i, s.getAmount() > 0 ? s : null); return; } }
+    }
+
     void webUnder(Bot b, LivingEntity t, long now) {
         if (!has(b.p.getInventory(), Material.COBWEB)) return;
         Block f = feetSpot(t);
@@ -564,7 +706,11 @@ final class Brain {
     }
     void aim(Bot b, LivingEntity t, long now) {
         Location l = t.getLocation().clone().add(0, t.getHeight() * 0.75, 0);
-        if (roll(st.d("mistake-chance") * (1.6 - 1.4 * skill(b)))) l.add(rnd.nextGaussian() * 1.2, rnd.nextGaussian() * 0.4, rnd.nextGaussian() * 1.2);
+        if (!god(b) && roll(st.d("mistake-chance") * (1.6 - 1.4 * skill(b)))) l.add(rnd.nextGaussian() * 1.2, rnd.nextGaussian() * 0.4, rnd.nextGaussian() * 1.2);
+        // small human-like wobble on the aim, smoothed so it drifts instead of shaking
+        double wob = god(b) ? 0.08 : 0.15 + (1 - skill(b)) * 0.5;
+        b.jitterYaw = b.jitterYaw * 0.85 + rnd.nextGaussian() * wob * 0.15; b.jitterPitch = b.jitterPitch * 0.85 + rnd.nextGaussian() * wob * 0.08;
+        l.add(b.jitterYaw, b.jitterPitch, b.jitterYaw * 0.5);
         face(b, l, aimStep(b));
     }
     /** turn towards a point, at most maxStep degrees per tick */

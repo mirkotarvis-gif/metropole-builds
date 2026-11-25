@@ -102,7 +102,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
     static int level(String v) {
         return switch (v.toLowerCase(Locale.ROOT)) {
             case "noob", "easy", "lt5" -> 15; case "lt4" -> 30; case "normal", "medium", "lt3" -> 50; case "ht3" -> 60;
-            case "hard", "lt2" -> 70; case "ht2" -> 80; case "lt1" -> 90; case "ht1", "pro", "max" -> 100;
+            case "hard", "lt2" -> 70; case "ht2" -> 80; case "lt1" -> 90; case "ht1", "pro", "max" -> 100; case "marlowww", "marlow", "marloww", "grandmaster", "god" -> 101;
             default -> Integer.parseInt(v);
         };
     }
@@ -115,10 +115,10 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         if (a[1].equalsIgnoreCase("default")) { String err = st.setSetting("skill", String.valueOf(level(a[2]))); s.sendMessage(err != null ? R + err : G + "Default difficulty: " + W + st.i("skill")); return; }
         List<Bot> bs = pick(s, a[1]); if (bs.isEmpty()) return;
         int v = a[2].equalsIgnoreCase("reset") ? -1 : level(a[2]);
-        if (v != -1 && (v < 1 || v > 100)) { s.sendMessage(R + "1-100"); return; }
+        if (v != -1 && (v < 1 || v > 101)) { s.sendMessage(R + "1-100, or marlowww"); return; }
         for (Bot b : bs) b.skill = v;
         pl.saveBots();
-        s.sendMessage(G + "Difficulty of " + bs.size() + " bot(s): " + W + (v == -1 ? "default (" + st.i("skill") + ")" : v));
+        s.sendMessage(G + "Difficulty of " + bs.size() + " bot(s): " + W + (v == -1 ? "default (" + st.i("skill") + ")" : v == 101 ? "§d§lMARLOWWW §7(combat grandmaster)" : v));
     }
     List<String> names() { List<String> l = new ArrayList<>(); for (Bot b : pl.bots.values()) l.add(b.name); return l; }
     Bot need(CommandSender s, String[] a, int i) { Bot b = pl.bot(a[i]); if (b == null) s.sendMessage(R + a[i] + " is not a bot"); return b; }
@@ -289,7 +289,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | stop-spawn | reload");
         s.sendMessage(D + "/pvpbot attack <bot> <target> | stop-attack <bot>");
         s.sendMessage(D + "/pvpbot target <bot|all|faction> add|set|remove|clear|list [players...]");
-        s.sendMessage(D + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|reset>");
+        s.sendMessage(D + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|marlowww|reset>");
         s.sendMessage(D + "/pvpbot faction list|create|delete|info|add|remove|add-near|add-all|hostile|attack|give|tp|path|kit");
         s.sendMessage(D + "/pvpbot create-kit|delete-kit|kits|give-kit|give-kit-near|give-kit-near-random");
         s.sendMessage(D + "/pvpbot path create|delete|add-point|remove-point|clear|list|info|loop|walk-type|show|start|stop|distribute|start-near|stop-all");
@@ -344,7 +344,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         if (a0.equals("target") || a0.equals("difficulty")) {
             out.clear();
             if (a.length == 2) { out.addAll(bots); out.add("all"); out.addAll(facs); if (a0.equals("difficulty")) out.add("default"); }
-            else if (a.length == 3) out.addAll(a0.equals("target") ? List.of("add", "set", "remove", "clear", "list") : List.of("easy", "normal", "hard", "ht1", "lt5", "lt4", "lt3", "ht3", "lt2", "ht2", "lt1", "reset", "50", "100"));
+            else if (a.length == 3) out.addAll(a0.equals("target") ? List.of("add", "set", "remove", "clear", "list") : List.of("easy", "normal", "hard", "ht1", "marlowww", "lt5", "lt4", "lt3", "ht3", "lt2", "ht2", "lt1", "reset", "50", "100"));
             else if (a0.equals("target")) out.addAll(players);
         }
         String last = a[a.length - 1].toLowerCase(Locale.ROOT);

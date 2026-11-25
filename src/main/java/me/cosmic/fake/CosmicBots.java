@@ -37,7 +37,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         getCommand("pvpbot").setExecutor(pvp); getCommand("pvpbot").setTabCompleter(pvp);
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 1L, 1L);
         Bukkit.getScheduler().runTaskLater(this, this::restore, 60L);
-        getLogger().info("CosmicBots 2.2 ready: /player and /pvpbot");
+        getLogger().info("CosmicBots 2.3 ready: /player and /pvpbot");
     }
     @Override public void onDisable() { saveBots(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
 
@@ -287,6 +287,11 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         if (!(e.getEntity() instanceof Player victim)) return;
         if (src instanceof Player att && !store.b("friendly-fire") && store.sameFaction(att.getName(), victim.getName()) && !att.equals(victim)) { e.setCancelled(true); return; }
         Bot b = bot(victim.getName());
+        // teamwork: bots on the same team don't hurt each other (sweeps, arrows, carts) unless one was told to attack the other
+        if (b != null && src instanceof Player att && !att.equals(victim) && store.b("teamwork") && !store.b("target-bots")) {
+            Bot ab = bot(att.getName());
+            if (ab != null && brain.team(ab, b) && !victim.getUniqueId().equals(ab.forced) && ab.targets.stream().noneMatch(x -> x.equalsIgnoreCase(victim.getName()))) { e.setCancelled(true); return; }
+        }
         if (b != null && src instanceof LivingEntity le && !le.equals(victim) && store.b("revenge")) { b.revenge = le.getUniqueId(); b.revengeAt = ticks; }
     }
     @EventHandler(priority = EventPriority.MONITOR)

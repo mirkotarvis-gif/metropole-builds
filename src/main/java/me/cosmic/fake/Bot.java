@@ -38,4 +38,5 @@ final class Bot {
     int tapTicks, webTicks; long stunAt = -1, lastPearl, lastGap, maceSeen, retotemAt, spawnedAt;
     boolean critPlan, antiMace, removing; long lastKickLog = -1000;
     org.bukkit.util.Vector tVel = new org.bukkit.util.Vector(); Location tLast; java.util.UUID tId; int webBreak;
+    java.util.UUID curTarget; long lastCart, lastBox, nextStrafeFlip, nextHop; float strafeAmt = 0.5f; double jitterYaw, jitterPitch;
 }
