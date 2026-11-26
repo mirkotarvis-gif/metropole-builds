@@ -303,8 +303,10 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         Bot b = bot(e.getEntity().getName()); if (b == null) return;
         b.revenge = null; b.blocking = false; b.antiMace = false; b.stunAt = -1; b.tapTicks = 0; b.eatTicks = 0; // targets + /pvpbot attack are kept
         if (ticks - b.spawnedAt < 200) getLogger().warning("Bot " + b.name + " died right after spawning: " + e.getDeathMessage());
-        if (store.b("bot-leave-on-death")) { Bukkit.getScheduler().runTaskLater(this, () -> remove(b, "Died"), 2L); return; }
+        b.diedAt = ticks;
+        if (store.b("bot-leave-on-death")) { Bukkit.getScheduler().runTaskLater(this, () -> { if (!b.removing) remove(b, "Died"); }, 1L); return; }
         Bukkit.getScheduler().runTaskLater(this, () -> {
+            if (b.removing || bot(b.name) != b || !b.p.isOnline()) return; // removed meanwhile: don't bring it back
             try { b.p.spigot().respawn(); } catch (Throwable ignored) {}
             Player np = Bukkit.getPlayer(b.p.getUniqueId());
             if (np != null) { b.p = np; try { b.nms = Nms.invoke(np, "getHandle"); } catch (Throwable ignored) {} }
@@ -321,6 +323,10 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     public void onKick(org.bukkit.event.player.PlayerKickEvent e) {
         Bot b = bot(e.getPlayer().getName());
         if (b == null || b.removing) return;
+        String why = org.bukkit.ChatColor.stripColor(e.getReason() == null ? "" : e.getReason()).toLowerCase(Locale.ROOT);
+        boolean automatic = why.contains("timed out") || why.contains("timeout") || why.contains("flying") || why.contains("spam") || why.contains("too quickly")
+                || why.contains("idle") || why.contains("invalid") || why.contains("illegal") || why.contains("keep") || why.isBlank();
+        if (!automatic) { b.removing = true; return; } // /kick, death-kick plugins etc. work normally
         e.setCancelled(true);
         if (ticks - b.lastKickLog > 200) { b.lastKickLog = ticks; getLogger().info("Blocked a kick for bot " + b.name + ": " + org.bukkit.ChatColor.stripColor(e.getReason())); }
     }

@@ -22,8 +22,8 @@ final class Store {
         for (String k : new String[]{"auto-armor", "auto-weapon", "combat", "revenge", "target-players", "criticals", "ranged", "mace", "crystal-pvp", "anchor-pvp",
                 "retreat", "auto-totem", "totem-priority", "auto-shield", "shield-break", "shield-mace", "prefer-sword", "auto-eat", "auto-potion", "auto-mend", "bhop",
                 "safe-spawn", "clear-on-remove", "arrow-prediction", "ranged-strafe", "ranged-retreat", "cobwebs",
-                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick"}) DEFAULTS.put(k, true);
-        for (String k : new String[]{"target-bots", "drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names", "bot-leave-on-death",
+                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick", "bot-leave-on-death"}) DEFAULTS.put(k, true);
+        for (String k : new String[]{"target-bots", "drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names",
                 "attack-invincible", "profile-lagg-fix"}) DEFAULTS.put(k, false);
         num("interval", 1, 1, 100); num("attack-cooldown", 10, 1, 40); num("crit-fall-ticks", 3, 1, 10); num("shield-hold-ticks", 40, 10, 200);
         num("shield-raise-ticks", 5, 2, 40); num("bow-draw-ticks", 22, 5, 100); num("melee-range", 3.0, 2, 6); num("move-speed", 1.0, 0.1, 2.0);
@@ -77,6 +77,7 @@ final class Store {
         }
         // v2.2: bots from a mass-spawn were killing each other right away; bots no longer target other bots unless you turn it on
         if (s.getInt("config-version", 1) < 2) { set.put("target-bots", false); saveSettings(); }
+        if (s.getInt("config-version", 1) < 3) { set.put("bot-leave-on-death", true); saveSettings(); }
         YamlConfiguration f = YamlConfiguration.loadConfiguration(new File(dir, "factions.yml"));
         factions.clear();
         for (String k : f.getKeys(false)) { Faction fa = new Faction(k); fa.members.addAll(f.getStringList(k + ".members")); for (String h : f.getStringList(k + ".hostile")) fa.hostile.add(h.toLowerCase()); factions.put(k.toLowerCase(), fa); }
@@ -92,7 +93,7 @@ final class Store {
             paths.put(k.toLowerCase(), p);
         }
     }
-    void saveSettings() { YamlConfiguration s = new YamlConfiguration(); s.set("config-version", 2); set.forEach(s::set); try { s.save(new File(dir, "settings.yml")); } catch (Exception ignored) {} }
+    void saveSettings() { YamlConfiguration s = new YamlConfiguration(); s.set("config-version", 3); set.forEach(s::set); try { s.save(new File(dir, "settings.yml")); } catch (Exception ignored) {} }
     void saveFactions() {
         YamlConfiguration f = new YamlConfiguration();
         for (Faction fa : factions.values()) { f.set(fa.name + ".members", new ArrayList<>(fa.members)); f.set(fa.name + ".hostile", new ArrayList<>(fa.hostile)); }
