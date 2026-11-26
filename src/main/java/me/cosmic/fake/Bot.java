@@ -1,6 +1,7 @@
 package me.cosmic.fake;
 
 import org.bukkit.Location;
+import org.bukkit.entity.LivingEntity;
 import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
@@ -46,4 +47,5 @@ final class Bot {
     final double prefRange = -0.45 + Math.random() * 0.6, wobble = 0.6 + Math.random() * 0.8;
     double needNext = 0.95; long pauseUntil, diedAt = -1000;
     Style style = Style.random();
+    boolean asleep; LivingEntity warCache; long warAt = -100;
 }

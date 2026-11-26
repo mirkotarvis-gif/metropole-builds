@@ -36,7 +36,7 @@ final class SettingsGui implements Listener {
             new Page("Targeting", Material.TARGET, new String[]{"combat", "revenge", "auto-target", "target-players", "target-bots", "target-mobs", "friendly-fire",
                     "attack-invincible"}),
             new Page("Bots", Material.PLAYER_HEAD, new String[]{"random-nick", "bot-leave-on-death", "safe-spawn", "idle", "special-names", "profile-lagg-fix",
-                    "max-mass-spawn", "view-distance", "idle-radius", "drop-distance", "move-speed", "interval"}),
+                    "auto-performance", "sleep-distance", "max-mass-spawn", "view-distance", "idle-radius", "drop-distance", "move-speed", "interval"}),
             new Page("Skill & Aim", Material.SPYGLASS, new String[]{"skill", "aim-speed", "miss-chance", "mistake-chance", "melee-range", "attack-cooldown",
                     "crit-fall-ticks", "shield-break-chance", "shield-hold-ticks", "shield-raise-ticks", "bow-draw-ticks", "ranged-min-range",
                     "ranged-optimal-range", "ranged-max-range"}),
@@ -53,7 +53,7 @@ final class SettingsGui implements Listener {
                 {"mace", "Wind charge + mace"}, {"ranged", "Bows and crossbows"}, {"cobwebs", "Webs while retreating"},
                 {"retreat", "Run when low"}, {"bhop", "Bunny hop when chasing"}, {"random-nick", "Random nick + skin on spawn"},
                 {"bot-leave-on-death", "Bots leave when they die"}, {"auto-target", "Attack anyone nearby"}, {"skill", "Default difficulty (101 = marlowww)"},
-                {"max-mass-spawn", "Max bots per mass-spawn"}, {"aim-speed", "Degrees per tick"}, {"interval", "Think every N ticks"},
+                {"max-mass-spawn", "Max bots per mass-spawn"}, {"aim-speed", "Degrees per tick"}, {"interval", "Think every N ticks"}, {"auto-performance", "Less thinking per bot when there are lots"}, {"sleep-distance", "Bots this far from every real player freeze (0 = never)"},
         };
         for (String[] x : d) INFO.put(x[0], x[1]);
     }

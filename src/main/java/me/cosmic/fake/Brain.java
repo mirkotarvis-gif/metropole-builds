@@ -39,7 +39,7 @@ final class Brain {
     // =================================================================== main tick
     void tick(Bot b, long now) {
         Player p = b.p;
-        int every = Math.max(1, st.i("interval"));
+        int every = Math.max(1, pl.thinkEvery);
         if (every > 1 && (now + b.name.hashCode()) % every != 0) { b.jump = false; return; } // keep last move, think later
         b.forward = 0; b.strafe = 0; b.jump = false;
         if (now % 10 == 0) upkeep(b, now);
@@ -79,19 +79,23 @@ final class Brain {
         // war: find the closest enemy faction member, even far away
         Store.Faction myF = st.factionOf(b.name);
         if (myF != null && !myF.hostile.isEmpty()) {
+            if (now - b.warAt < 20 && b.warCache != null && valid(b, b.warCache, 160, true)) return b.warCache;
+            b.warAt = now + (Math.abs(b.name.hashCode()) % 7);
             LivingEntity foe = null; double fd = 1e9;
             for (Player o : p.getWorld().getPlayers()) {
                 if (o == p || !st.hostile(b.name, o.getName()) || !valid(b, o, 160, true)) continue;
                 double dd = dist(p, o); if (dd < fd) { fd = dd; foe = o; }
             }
+            b.warCache = foe;
             if (foe != null) return foe;
         }
         // teamwork: help a teammate who is already fighting
         if (st.b("teamwork")) {
             LivingEntity help = null; double hd = 1e9;
-            for (Bot o : pl.bots.values()) {
-                if (o == b || o.curTarget == null || !team(b, o) || !o.p.getWorld().equals(p.getWorld()) || dist(p, o.p) > 24) continue;
-                Entity e = Bukkit.getEntity(o.curTarget);
+            for (Map.Entry<UUID, List<Bot>> sqe : pl.squads.entrySet()) {
+                Bot o = null; for (Bot c : sqe.getValue()) if (c != b && team(b, c) && c.p.getWorld().equals(p.getWorld()) && dist(p, c.p) <= 24) { o = c; break; }
+                if (o == null) continue;
+                Entity e = Bukkit.getEntity(sqe.getKey());
                 if (e instanceof LivingEntity le && !(le instanceof Player lp && pl.isBot(lp) && team(b, pl.bot(lp.getName()))) && valid(b, le, vd, true)) { double dd = dist(p, le); if (dd < hd) { hd = dd; help = le; } }
             }
             if (help != null) return help;
@@ -118,8 +122,8 @@ final class Brain {
     }
     /** bots on our team fighting the same target, sorted by name so each one gets a fixed spot */
     List<Bot> squad(Bot b, LivingEntity t) {
-        List<Bot> l = new ArrayList<>();
-        for (Bot o : pl.bots.values()) if (o == b || (t.getUniqueId().equals(o.curTarget) && team(b, o) && o.p.getWorld().equals(t.getWorld()) && dist(o.p, t) < 32)) l.add(o);
+        List<Bot> l = new ArrayList<>(); l.add(b);
+        for (Bot o : pl.squads.getOrDefault(t.getUniqueId(), List.of())) if (o != b && team(b, o) && o.p.getWorld().equals(t.getWorld()) && dist(o.p, t) < 32) l.add(o);
         l.sort(Comparator.comparing(o -> o.name));
         return l;
     }
@@ -471,7 +475,7 @@ final class Brain {
     void fullbox(Bot b, LivingEntity t, long now) {
         Player p = b.p; PlayerInventory inv = p.getInventory();
         if (now - b.lastBox < (god(b) ? 1 : 3) || !has(inv, Brain::buildBlock)) return;
-        for (Bot o : pl.bots.values()) if (o != b && t.getUniqueId().equals(o.curTarget) && team(b, o) && dist(o.p, t) < dist(p, t) - 0.3) return; // a closer teammate builds
+        for (Bot o : pl.squads.getOrDefault(t.getUniqueId(), List.of())) if (o != b && team(b, o) && dist(o.p, t) < dist(p, t) - 0.3) return; // a closer teammate builds
         Block f = t.getLocation().getBlock();
         Vector me = p.getLocation().toVector().subtract(t.getLocation().toVector()).setY(0);
         int ox = 0, oz = 0;

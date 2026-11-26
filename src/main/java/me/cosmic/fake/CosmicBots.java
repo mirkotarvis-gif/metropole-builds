@@ -24,6 +24,7 @@ import java.util.function.Consumer;
 public final class CosmicBots extends JavaPlugin implements Listener, CommandExecutor, TabCompleter {
     final Map<String, Bot> bots = new LinkedHashMap<>();
     final Set<String> pending = new HashSet<>();
+    int thinkEvery = 1; boolean saveSoon; final Map<UUID, List<Bot>> squads = new HashMap<>();
     int spawnGen;
     Store store; Brain brain; PvpCmd pvp; SettingsGui gui;
     /** names of bots that died: never used again */
@@ -44,7 +45,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         Bukkit.getScheduler().runTaskLater(this, this::restore, 60L);
         getLogger().info("CosmicBots 2.5 ready: /player and /pvpbot");
     }
-    @Override public void onDisable() { saveBots(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
+    @Override public void onDisable() { saveBotsNow(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
 
     /** a player by real name, or by the name they show (nicknames) */
     Player findPlayer(String n) {
@@ -76,6 +77,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
                 Object[] r = Nms.join(name, prof, at);
                 Bot b = new Bot(name, r[0], (Player) r[1]);
                 b.spawnedAt = ticks;
+                try { b.p.setViewDistance(3); b.p.setSimulationDistance(3); b.p.setSendViewDistance(2); } catch (Throwable ignored) {}
                 b.p.setGameMode(gm == null ? GameMode.SURVIVAL : gm);
                 bots.put(name.toLowerCase(Locale.ROOT), b);
                 saveBots();
@@ -126,7 +128,8 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         bots.clear(); saveBots();
         return n;
     }
-    void saveBots() {
+    void saveBots() { saveSoon = true; }
+    void saveBotsNow() {
         YamlConfiguration y = new YamlConfiguration();
         for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); y.set(b.name + ".style", b.style.name()); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); if (b.forced != null) y.set(b.name + ".forced", b.forced.toString()); }
         try { y.save(new File(getDataFolder(), "bots.yml")); } catch (Exception ignored) {}
@@ -146,11 +149,30 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     private void tick() {
         ticks++;
         double speed = store.d("move-speed");
+        int n = bots.size();
+        // performance: with lots of bots, each one thinks less often (movement still runs every tick)
+        thinkEvery = Math.max(1, Math.max(store.i("interval"), !store.b("auto-performance") ? 1 : n > 1500 ? 10 : n > 700 ? 6 : n > 300 ? 4 : n > 120 ? 3 : n > 40 ? 2 : 1));
+        // who's fighting whom (one pass, shared by every bot instead of each bot scanning all the others)
+        squads.clear();
+        for (Bot b : bots.values()) if (b.curTarget != null) squads.computeIfAbsent(b.curTarget, k -> new ArrayList<>()).add(b);
+        // bots far from every real player go to sleep (no AI, no physics) so wars nobody watches cost nothing
+        double sleep = store.d("sleep-distance");
+        if (ticks % 20 == 0) {
+            List<Location> real = new ArrayList<>();
+            for (Player p : Bukkit.getOnlinePlayers()) if (!isBot(p)) real.add(p.getLocation());
+            for (Bot b : bots.values()) {
+                if (sleep <= 0) { b.asleep = false; continue; }
+                boolean near = false; Location l = b.p.getLocation();
+                for (Location r : real) if (r.getWorld() == l.getWorld() && r.distanceSquared(l) < sleep * sleep) { near = true; break; }
+                b.asleep = !near;
+            }
+        }
+        if (saveSoon && ticks % 100 == 0) { saveSoon = false; saveBotsNow(); }
         for (Bot b : new ArrayList<>(bots.values())) {
             try {
                 if (!b.p.isOnline()) { bots.remove(b.name.toLowerCase(Locale.ROOT)); continue; }
                 if (ticks % 20 == 0) Nms.keepAlive(b.nms);
-                if (b.p.isDead()) continue;
+                if (b.p.isDead() || b.asleep) continue;
                 boolean manual = !b.acts.isEmpty() || b.manualForward != 0 || b.manualStrafe != 0;
                 if (manual) { manual(b); b.forward = b.manualForward; b.strafe = b.manualStrafe; b.jump = b.acts.containsKey("jump") && !b.acts.get("jump").once; }
                 else brain.tick(b, ticks);
