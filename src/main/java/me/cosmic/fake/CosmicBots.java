@@ -33,6 +33,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
 
     @Override public void onEnable() {
         store = new Store(getDataFolder()); store.load(); store.saveAll();
+        loadAllowed();
         brain = new Brain(this); pvp = new PvpCmd(this); gui = new SettingsGui(store);
         Bukkit.getPluginManager().registerEvents(this, this);
         Bukkit.getPluginManager().registerEvents(gui, this);
@@ -206,7 +207,19 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     }
 
     // ================================================================= /player (Carpet style)
+    /** only these players (plus the console) may use the bot commands; edit plugins/CosmicBots/allowed.txt to change */
+    final Set<String> allowed = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+    void loadAllowed() {
+        File f = new File(getDataFolder(), "allowed.txt");
+        try {
+            if (!f.exists()) { getDataFolder().mkdirs(); java.nio.file.Files.write(f.toPath(), List.of("MirkoJK", "ThatOneBlood", "ThatOneFearBlood")); }
+            allowed.clear(); for (String l : java.nio.file.Files.readAllLines(f.toPath())) if (!l.isBlank() && !l.startsWith("#")) allowed.add(l.trim());
+        } catch (Exception e) { allowed.addAll(List.of("MirkoJK", "ThatOneBlood", "ThatOneFearBlood")); }
+    }
+    boolean allowed(CommandSender s) { return !(s instanceof Player p) || allowed.contains(p.getName()) || p.hasPermission("cosmicbots.use"); }
+
     @Override public boolean onCommand(CommandSender s, Command cmd, String label, String[] a) {
+        if (!allowed(s)) { s.sendMessage(ChatColor.RED + "You can't use bot commands."); return true; }
         if (a.length == 0 || a[0].equalsIgnoreCase("list")) { s.sendMessage("§eBots: §f" + (bots.isEmpty() ? "none" : String.join(", ", bots.keySet()))); return true; }
         String name = a[0];
         if (a.length < 2) { s.sendMessage("§c/player " + name + " <spawn|kill|stop|attack|use|jump|look|turn|move|sneak|unsneak|sprint|unsprint|drop|dropStack|swapHands|hotbar>"); return true; }
@@ -271,6 +284,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     static double coord(String v, double base) { return v.startsWith("~") ? base + (v.length() > 1 ? Double.parseDouble(v.substring(1)) : 0) : Double.parseDouble(v); }
 
     @Override public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
+        if (!allowed(s)) return new ArrayList<>();
         List<String> out = new ArrayList<>();
         if (a.length == 1) { out.addAll(bots.keySet()); out.add("list"); }
         else if (a.length == 2) out.addAll(List.of("spawn", "kill", "stop", "attack", "use", "jump", "look", "turn", "move", "sneak", "unsneak", "sprint", "unsprint", "drop", "dropStack", "swapHands", "hotbar"));

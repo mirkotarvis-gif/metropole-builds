@@ -18,6 +18,8 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
     static final String G = "§a", R = "§c", Y = "§e", W = "§f", D = "§7";
 
     @Override public boolean onCommand(CommandSender s, Command c, String label, String[] a) {
+        if (!pl.allowed(s)) { s.sendMessage(R + "You can't use bot commands."); return true; }
+        if (a.length > 0 && a[0].equalsIgnoreCase("reload")) pl.loadAllowed();
         if (a.length == 0) { help(s); return true; }
         if (a[0].equalsIgnoreCase("bot-management") && a.length > 1) a = Arrays.copyOfRange(a, 1, a.length);
         try {
@@ -372,6 +374,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
 
     // ================================================================ tab completion
     @Override public List<String> onTabComplete(CommandSender s, Command c, String label, String[] a) {
+        if (!pl.allowed(s)) return new ArrayList<>();
         List<String> out = new ArrayList<>();
         List<String> bots = names(), facs = new ArrayList<>(st.factions.keySet()), kits = new ArrayList<>(st.kits.keySet()), paths = new ArrayList<>(st.paths.keySet());
         List<String> players = new ArrayList<>(); for (Player p : Bukkit.getOnlinePlayers()) players.add(p.getName());

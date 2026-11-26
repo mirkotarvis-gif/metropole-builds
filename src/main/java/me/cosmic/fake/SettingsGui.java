@@ -136,7 +136,7 @@ final class SettingsGui implements Listener {
         if (!(e.getWhoClicked() instanceof Player p) || e.getClickedInventory() != e.getInventory()) return;
         String k = h.slots.get(e.getRawSlot());
         if (k == null) return;
-        if (!p.hasPermission("cosmicbots.use")) { p.closeInventory(); return; }
+        if (!((CosmicBots) org.bukkit.Bukkit.getPluginManager().getPlugin("CosmicBots")).allowed(p)) { p.closeInventory(); return; }
         switch (k) {
             case "#prev" -> { open(p, h.page - 1); click(p); return; }
             case "#next" -> { open(p, h.page + 1); click(p); return; }
