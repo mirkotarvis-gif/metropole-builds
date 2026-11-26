@@ -37,7 +37,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         getCommand("pvpbot").setExecutor(pvp); getCommand("pvpbot").setTabCompleter(pvp);
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 1L, 1L);
         Bukkit.getScheduler().runTaskLater(this, this::restore, 60L);
-        getLogger().info("CosmicBots 2.3 ready: /player and /pvpbot");
+        getLogger().info("CosmicBots 2.4 ready: /player and /pvpbot");
     }
     @Override public void onDisable() { saveBots(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
 

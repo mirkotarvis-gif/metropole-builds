@@ -109,7 +109,7 @@ final class Brain {
     /** bots on our team fighting the same target, sorted by name so each one gets a fixed spot */
     List<Bot> squad(Bot b, LivingEntity t) {
         List<Bot> l = new ArrayList<>();
-        for (Bot o : pl.bots.values()) if (o == b || (t.getUniqueId().equals(o.curTarget) && team(b, o) && o.p.getWorld().equals(t.getWorld()) && dist(o.p, t) < 12)) l.add(o);
+        for (Bot o : pl.bots.values()) if (o == b || (t.getUniqueId().equals(o.curTarget) && team(b, o) && o.p.getWorld().equals(t.getWorld()) && dist(o.p, t) < 32)) l.add(o);
         l.sort(Comparator.comparing(o -> o.name));
         return l;
     }
@@ -141,6 +141,7 @@ final class Brain {
         track(b, t);
         double hp = p.getHealth(), max = maxHp(p);
         if (antiMace(b, t, now)) return;
+        if (placeStep(b, now)) { approach(b, t, d, st.d("melee-range"), now); return; }
         PlayerInventory inv = p.getInventory();
         // golden apple mid-fight when low (backs off while eating)
         if (st.b("auto-eat") && hp < max * 0.45 && now - b.lastGap > 70 && d > 2.2) {
@@ -211,8 +212,8 @@ final class Brain {
         if (b.stunAt > 0 && now >= b.stunAt) {
             b.stunAt = -1;
             hold(p, has(p.getInventory(), Material.MACE) && !st.b("prefer-sword") ? (s -> s.getType() == Material.MACE) : swordFirst());
-            face(b, t.getLocation().clone().add(0, t.getHeight() * 0.75, 0), 180);
-            if (d <= range + 0.4 && blocker(b, t) == null) { b.lastAttack = now; p.attack(t); p.swingMainHand(); }
+            face(b, t.getLocation().clone().add(0, t.getHeight() * 0.75, 0), Math.max(aimStep(b) * 2, 45));
+            if (d <= range + 0.4 && blocker(b, t) == null && looking(b, t, range)) { b.lastAttack = now; p.attack(t); p.swingMainHand(); }
             if (st.b("stun-web") && roll(sk * 100)) webUnder(b, t, now);
             return;
         }
@@ -238,7 +239,7 @@ final class Brain {
         // stun web: drop a web under them when they're close
         if (st.b("stun-web") && d < 3.2 && now - b.lastCobweb > 160 - 80 * sk && roll(3 + 5 * sk)) webUnder(b, t, now);
         if (d > range) { b.critWait = -1; return; }
-        double need = 0.55 + 0.4 * sk; // weak bots click early, good bots wait for full cooldown
+        double need = god(b) ? b.needNext : Math.min(1, (0.55 + 0.4 * sk) * b.needNext); // varies every swing
         boolean ready = p.getAttackCooldown() >= need && now - b.lastAttack >= st.i("attack-cooldown");
         if (!ready) return;
         // crit spam: jump, hit on the way down
@@ -258,7 +259,9 @@ final class Brain {
             p.setSprinting(false); // sprinting cancels crits
         }
         boolean sprintHit = p.isSprinting();
+        long before = b.lastAttack;
         hit(b, t, now);
+        if (b.lastAttack != before) b.needNext = god(b) ? 0.93 + rnd.nextDouble() * 0.07 : 0.85 + rnd.nextDouble() * 0.2;
         b.critWait = -1;
         if (breakShield && st.b("stun") && roll(30 + 70 * sk)) b.stunAt = now + 1;
         if (sprintHit && st.b("s-tap") && roll(20 + 80 * sk)) b.tapTicks = 2 + rnd.nextInt(2);
@@ -266,6 +269,9 @@ final class Brain {
 
     void approach(Bot b, LivingEntity t, double d, double range, long now) {
         Player p = b.p; double sk = skill(b);
+        range += b.prefRange;
+        if (now < b.pauseUntil && d < range + 3) { b.forward = 0; b.strafe = 0; return; } // a human-like hesitation
+        if (!god(b) && d < range + 2 && rnd.nextInt(140) == 0) b.pauseUntil = now + 3 + rnd.nextInt(8);
         if (d > range - 0.6) { b.forward = 1; run(b, d > 6, now); }
         else if (d < 1.2) b.forward = -0.5f;
         else b.forward = (float) (rnd.nextDouble() * 0.6 - 0.2); // small random in/out steps instead of standing still
@@ -275,16 +281,19 @@ final class Brain {
             b.strafeAmt = (float) (0.25 + rnd.nextDouble() * (0.3 + 0.45 * sk));
             b.nextStrafeFlip = now + 6 + rnd.nextInt(god(b) ? 18 : 30);
         }
-        if (d < range + 2.5) b.strafe = b.strafeAmt * b.strafeDir;
+        if (d < range + 2.5) b.strafe = (float) (b.strafeAmt * b.wobble) * b.strafeDir;
         // the odd random hop while circling
         if (d < range + 2 && now >= b.nextHop && Nms.onGround(b.nms) && b.critWait < 0) { if (rnd.nextInt(4) == 0) b.jump = true; b.nextHop = now + 20 + rnd.nextInt(60); }
         // teamwork: spread around the target instead of stacking on one side
-        if (st.b("teamwork") && d < range + 4) {
+        if (st.b("teamwork") && d < 32) {
             List<Bot> sq = squad(b, t);
             if (sq.size() > 1) {
                 int idx = sq.indexOf(b);
-                double base = Math.atan2(sq.get(0).p.getLocation().getZ() - t.getLocation().getZ(), sq.get(0).p.getLocation().getX() - t.getLocation().getX());
-                double ang = base + idx * 2 * Math.PI / sq.size(), r = Math.max(1.8, range - 0.5);
+                // each bot owns a fixed angle around the target, and fans out to it early so they don't arrive in one pack
+                double base = (Math.floorMod(t.getUniqueId().getLeastSignificantBits(), 628L)) / 100.0;
+                double ang = base + idx * 2 * Math.PI / sq.size() + Math.sin(now / 40.0 + idx) * 0.25;
+                double r = Math.max(1.8, range - 0.5);
+                if (d > range + 3) r = Math.min(Math.max(r, d * 0.6), 9);
                 Location spot = t.getLocation().clone().add(Math.cos(ang) * r, 0, Math.sin(ang) * r);
                 Vector go = spot.toVector().subtract(p.getLocation().toVector()).setY(0);
                 if (go.lengthSquared() > 0.6) {
@@ -314,8 +323,14 @@ final class Brain {
         }
         return first;
     }
+    /** is the crosshair actually on them? */
+    boolean looking(Bot b, LivingEntity t, double reach) {
+        Location eye = b.p.getEyeLocation();
+        return t.getBoundingBox().expand(god(b) ? 0.2 : 0.1).rayTrace(eye.toVector(), eye.getDirection(), reach + 1) != null;
+    }
     void hit(Bot b, LivingEntity t, long now) {
         Player p = b.p;
+        if (!looking(b, t, st.d("melee-range"))) return; // keep turning, no silent aim
         Block wall = blocker(b, t);
         if (wall != null) { // can't hit through it: cut the web like a player would, otherwise just swing
             if (wall.getType() == Material.COBWEB && wall.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) < 4.5) breakWeb(b, wall, now);
@@ -455,20 +470,15 @@ final class Brain {
         for (int[] sd : sides) want.add(f.getRelative(sd[0], 1, sd[1]));          // head level, all sides
         want.add(f.getRelative(0, 2, 0));                                        // roof
         for (int[] sd : sides) if (sd[0] != ox || sd[1] != oz) want.add(f.getRelative(sd[0], 0, sd[1])); // feet level except our side
-        int placed = 0, max = god(b) ? 3 : 1;
         for (Block w : want) {
-            if (placed >= max) break;
             if (!(w.getType().isAir() || w.getType() == Material.WATER || w.getType() == Material.SHORT_GRASS)) continue;
             if (w.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) > 4.6) continue;
             if (!w.getWorld().getNearbyEntities(w.getBoundingBox(), e -> e instanceof LivingEntity).isEmpty()) continue;
             int sl = slotOf(inv, s -> s.getType() == Material.OBSIDIAN); if (sl < 0) sl = slotOf(inv, Brain::buildBlock);
             if (sl < 0) break;
-            ItemStack s = inv.getItem(sl);
-            w.setType(s.getType());
-            s.setAmount(s.getAmount() - 1); inv.setItem(sl, s.getAmount() > 0 ? s : null);
-            p.swingMainHand(); placed++;
+            if (plan(b, w, inv.getItem(sl).getType(), now, null)) b.lastBox = now;
+            break;
         }
-        if (placed > 0) b.lastBox = now;
     }
     /** crossbow cart / bow insta-cart: rail + TNT minecart at their feet, then a flaming arrow into it */
     boolean cart(Bot b, LivingEntity t, long now) {
@@ -479,34 +489,78 @@ final class Brain {
         if (spot == null || spot.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) > 5.5) return false;
         b.lastCart = now;
         boolean crossbow = has(inv, Material.CROSSBOW) && (!has(inv, Material.BOW) || rnd.nextBoolean());
-        int railSlot = slotOf(inv, s -> s.getType().name().endsWith("RAIL"));
-        Material railType = inv.getItem(railSlot).getType();
-        face(b, spot.getLocation().add(0.5, 0.2, 0.5), 180);
-        spot.setType(railType == Material.ACTIVATOR_RAIL || railType == Material.DETECTOR_RAIL || railType == Material.POWERED_RAIL ? railType : Material.RAIL);
-        take(inv, railType); p.swingMainHand();
+        Material railType = inv.getItem(slotOf(inv, s -> s.getType().name().endsWith("RAIL"))).getType();
         final Block rail = spot;
-        // a tick later: cart on the rail, then the arrow
-        Bukkit.getScheduler().runTaskLater(pl, () -> {
-            if (!p.isOnline() || p.isDead() || !rail.getType().name().endsWith("RAIL")) return;
+        return plan(b, spot, railType, now, () -> Bukkit.getScheduler().runTaskLater(pl, () -> {
+            if (!p.isOnline() || p.isDead() || !rail.getType().name().endsWith("RAIL") || !has(inv, Material.TNT_MINECART)) return;
+            hold(p, s -> s.getType() == Material.TNT_MINECART);
+            face(b, rail.getLocation().add(0.5, 0.1, 0.5), 180);
             org.bukkit.entity.minecart.ExplosiveMinecart cart = rail.getWorld().spawn(rail.getLocation().add(0.5, 0.1, 0.5), org.bukkit.entity.minecart.ExplosiveMinecart.class);
             take(inv, Material.TNT_MINECART); p.swingMainHand();
-            hold(p, s -> s.getType() == (crossbow ? Material.CROSSBOW : Material.BOW));
-            Location eye = p.getEyeLocation(); Vector to = cart.getLocation().add(0, 0.3, 0).toVector().subtract(eye.toVector());
-            float yaw = (float) Math.toDegrees(Math.atan2(-to.getX(), to.getZ())), pitch = (float) -Math.toDegrees(Math.atan2(to.getY(), Math.hypot(to.getX(), to.getZ())));
-            look(b, yaw, pitch);
-            Arrow ar = p.launchProjectile(Arrow.class, to.normalize().multiply(crossbow ? 3.15 : 3.0));
-            ar.setFireTicks(200); ar.setPickupStatus(AbstractArrow.PickupStatus.CREATIVE_ONLY);
-            takeArrow(inv);
-            // if the arrow somehow misses, the cart still goes off (like a flame hit would)
-            Bukkit.getScheduler().runTaskLater(pl, () -> { if (cart.isValid()) cart.explode(); }, 4L);
-        }, god(b) ? 1L : 2L + rnd.nextInt(2));
-        return true;
+            Bukkit.getScheduler().runTaskLater(pl, () -> {
+                if (!p.isOnline() || !cart.isValid()) return;
+                hold(p, s -> s.getType() == (crossbow ? Material.CROSSBOW : Material.BOW));
+                Location eye = p.getEyeLocation(); Vector to = cart.getLocation().add(0, 0.3, 0).toVector().subtract(eye.toVector());
+                float yaw = (float) Math.toDegrees(Math.atan2(-to.getX(), to.getZ())), pitch = (float) -Math.toDegrees(Math.atan2(to.getY(), Math.hypot(to.getX(), to.getZ())));
+                look(b, yaw, pitch);
+                Arrow ar = p.launchProjectile(Arrow.class, to.normalize().multiply(crossbow ? 3.15 : 3.0));
+                ar.setFireTicks(200); ar.setPickupStatus(AbstractArrow.PickupStatus.CREATIVE_ONLY);
+                takeArrow(inv);
+                Bukkit.getScheduler().runTaskLater(pl, () -> { if (cart.isValid()) cart.explode(); }, 4L);
+            }, god(b) ? 1L : 2L);
+        }, 1L));
     }
     static void takeArrow(PlayerInventory inv) {
         for (int i = 0; i < 36; i++) { ItemStack s = inv.getItem(i); if (s != null && s.getType().name().endsWith("ARROW")) { s.setAmount(s.getAmount() - 1); inv.setItem(i, s.getAmount() > 0 ? s : null); return; } }
     }
 
+    /** queue a block to place: the bot switches to it, looks at it, then places it (no silent placing) */
+    boolean plan(Bot b, Block spot, Material item, long now, Runnable after) {
+        if (b.placeSpot != null || spot == null || !has(b.p.getInventory(), item)) return false;
+        b.placeSpot = spot; b.placeMat = item; b.placeUntil = now + 14; b.placeAfter = after;
+        hold(b.p, s -> s.getType() == item);
+        return true;
+    }
+    boolean placeStep(Bot b, long now) {
+        if (b.placeSpot == null) return false;
+        Player p = b.p; Block spot = b.placeSpot; Material m = b.placeMat;
+        boolean free = spot.getType().isAir() || spot.getType() == Material.SHORT_GRASS || spot.getType() == Material.WATER;
+        if (now > b.placeUntil || !free || !has(p.getInventory(), m) || spot.getLocation().add(0.5, 0.5, 0.5).distance(p.getEyeLocation()) > 5) { b.placeSpot = null; b.placeAfter = null; return false; }
+        if (p.getInventory().getItemInMainHand().getType() != m) { hold(p, s -> s.getType() == m); return true; } // switch first, place next tick
+        Location c = spot.getLocation().add(0.5, m == Material.COBWEB ? 0.5 : 0.15, 0.5);
+        face(b, c, Math.max(aimStep(b) * 1.4, 20));
+        Vector want = c.toVector().subtract(p.getEyeLocation().toVector()).normalize();
+        if (p.getEyeLocation().getDirection().angle(want) > Math.toRadians(god(b) ? 14 : 9)) return true; // still turning
+        Material put = m.name().endsWith("RAIL") ? m : m == Material.TNT_MINECART ? null : m;
+        if (put != null) spot.setType(put);
+        take(p.getInventory(), m); p.swingMainHand();
+        if (m == Material.COBWEB) b.lastCobweb = now;
+        Runnable after = b.placeAfter; b.placeSpot = null; b.placeAfter = null;
+        if (after != null) after.run();
+        return true;
+    }
+    /** a free ground spot one block from the target on the side away from `from` (where knockback will push them) */
+    static Block behind(LivingEntity t, Location from) {
+        Block g = t.getLocation().getBlock();
+        Vector dir = t.getLocation().toVector().subtract(from.toVector()).setY(0);
+        if (dir.lengthSquared() < 0.01) return null;
+        dir.normalize();
+        int[][] tries = {{(int) Math.round(dir.getX()), (int) Math.round(dir.getZ())}, {(int) Math.signum(dir.getX()), 0}, {0, (int) Math.signum(dir.getZ())}};
+        for (int[] o : tries) {
+            if (o[0] == 0 && o[1] == 0) continue;
+            for (int dy = 0; dy >= -1; dy--) {
+                Block s = g.getRelative(o[0], dy, o[1]);
+                if (s.getType().isAir() && s.getRelative(0, -1, 0).getType().isSolid() && s.getRelative(0, 1, 0).isPassable()) return s;
+            }
+        }
+        return null;
+    }
     void webUnder(Bot b, LivingEntity t, long now) {
+        // not right under them: next to them, on the side our hits knock them into
+        if (now - b.lastCobweb < 40) return;
+        plan(b, behind(t, b.p.getLocation()), Material.COBWEB, now, null);
+    }
+    void webUnderOld(Bot b, LivingEntity t, long now) {
         if (!has(b.p.getInventory(), Material.COBWEB)) return;
         Block f = feetSpot(t);
         if (f == null) return;
@@ -605,10 +659,15 @@ final class Brain {
         }
         return null;
     }
+    /** retreating: drop a web between us and the chaser */
     void cobweb(Bot b, LivingEntity t, long now) {
         if (now - b.lastCobweb < 200 || !has(b.p.getInventory(), Material.COBWEB)) return;
-        Block f = feetSpot(t);
-        if (f != null) { f.setType(Material.COBWEB); take(b.p.getInventory(), Material.COBWEB); b.p.swingMainHand(); b.lastCobweb = now; }
+        Block mine = b.p.getLocation().getBlock();
+        Vector dir = t.getLocation().toVector().subtract(b.p.getLocation().toVector()).setY(0);
+        if (dir.lengthSquared() < 0.01) return;
+        dir.normalize();
+        Block s = mine.getRelative((int) Math.round(dir.getX()), 0, (int) Math.round(dir.getZ()));
+        if (s.getType().isAir() && s.getRelative(0, -1, 0).getType().isSolid() && s.getLocation().add(0.5, 0, 0.5).distance(t.getLocation()) > 0.9) plan(b, s, Material.COBWEB, now, null);
     }
 
     // =================================================================== upkeep (every 10 ticks)

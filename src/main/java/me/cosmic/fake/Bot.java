@@ -1,6 +1,7 @@
 package me.cosmic.fake;
 
 import org.bukkit.Location;
+import org.bukkit.Material;
 import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 
@@ -39,4 +40,9 @@ final class Bot {
     boolean critPlan, antiMace, removing; long lastKickLog = -1000;
     org.bukkit.util.Vector tVel = new org.bukkit.util.Vector(); Location tLast; java.util.UUID tId; int webBreak;
     java.util.UUID curTarget; long lastCart, lastBox, nextStrafeFlip, nextHop; float strafeAmt = 0.5f; double jitterYaw, jitterPitch;
+    // pending block placement: hold the item, turn to the spot, place only when actually looking at it
+    org.bukkit.block.Block placeSpot; Material placeMat; long placeUntil; Runnable placeAfter;
+    // personality, so every bot plays a bit differently
+    final double prefRange = -0.45 + Math.random() * 0.6, wobble = 0.6 + Math.random() * 0.8;
+    double needNext = 0.95; long pauseUntil;
 }
