@@ -22,7 +22,7 @@ final class Store {
         for (String k : new String[]{"auto-armor", "auto-weapon", "combat", "revenge", "target-players", "criticals", "ranged", "mace", "crystal-pvp", "anchor-pvp",
                 "retreat", "auto-totem", "totem-priority", "auto-shield", "shield-break", "shield-mace", "prefer-sword", "auto-eat", "auto-potion", "auto-mend", "bhop",
                 "safe-spawn", "clear-on-remove", "arrow-prediction", "ranged-strafe", "ranged-retreat", "cobwebs",
-                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick", "bot-leave-on-death"}) DEFAULTS.put(k, true);
+                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick", "bot-leave-on-death", "graveyard"}) DEFAULTS.put(k, true);
         for (String k : new String[]{"target-bots", "drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names",
                 "attack-invincible", "profile-lagg-fix"}) DEFAULTS.put(k, false);
         num("interval", 1, 1, 100); num("attack-cooldown", 10, 1, 40); num("crit-fall-ticks", 3, 1, 10); num("shield-hold-ticks", 40, 10, 200);

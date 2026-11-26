@@ -76,6 +76,16 @@ final class Brain {
             if (best != null) return best;
         }
         if (b.revenge != null && st.b("revenge") && now - b.revengeAt < 300) { Entity e = Bukkit.getEntity(b.revenge); if (e instanceof LivingEntity le && valid(b, le, vd, true)) return le; }
+        // war: find the closest enemy faction member, even far away
+        Store.Faction myF = st.factionOf(b.name);
+        if (myF != null && !myF.hostile.isEmpty()) {
+            LivingEntity foe = null; double fd = 1e9;
+            for (Player o : p.getWorld().getPlayers()) {
+                if (o == p || !st.hostile(b.name, o.getName()) || !valid(b, o, 160, true)) continue;
+                double dd = dist(p, o); if (dd < fd) { fd = dd; foe = o; }
+            }
+            if (foe != null) return foe;
+        }
         // teamwork: help a teammate who is already fighting
         if (st.b("teamwork")) {
             LivingEntity help = null; double hd = 1e9;
@@ -151,7 +161,7 @@ final class Brain {
         // ender pearl to close the gap
         if (st.b("pearls") && d > 14 && d < 45 && now - b.lastPearl > 80 && skill(b) >= 0.4 && has(inv, Material.ENDER_PEARL) && !p.hasCooldown(Material.ENDER_PEARL)) { pearl(b, t, now); return; }
         // retreat when low
-        if (st.b("retreat") && hp < max * 0.3 && d < 10) {
+        if (st.b("retreat") && hp < max * b.style.retreatHp * 1.2 && d < 10) {
             if (st.b("cobwebs") && d < 3.5) cobweb(b, t, now);
             Vector away = p.getLocation().toVector().subtract(t.getLocation().toVector()).setY(0);
             if (away.lengthSquared() < 0.01) away = new Vector(1, 0, 0);
@@ -224,7 +234,7 @@ final class Brain {
         aim(b, t, now);
         // shields: block an incoming swing, a falling mace, or when low
         if ((hasOff(p, Material.SHIELD) || (st.b("auto-shield") && has(p.getInventory(), Material.SHIELD))) && p.getCooldown(Material.SHIELD) == 0) {
-            boolean danger = t instanceof Player o && d < range + 0.5 && o.getAttackCooldown() > 0.9f && rnd.nextInt(5) == 0;
+            boolean danger = t instanceof Player o && d < range + 0.5 && o.getAttackCooldown() > 0.9f && roll(20 + b.style.shield);
             boolean maceDrop = st.b("shield-mace") && t instanceof Player o2 && o2.getInventory().getItemInMainHand().getType() == Material.MACE && !o2.isOnGround() && vel(b, t).getY() < -0.1 && t.getLocation().getY() > p.getLocation().getY() + 1.5;
             boolean low = st.b("auto-shield") && p.getHealth() < maxHp(p) * 0.4;
             if ((danger || maceDrop || low) && !b.blocking) shield(b, now, st.i("shield-hold-ticks"));
@@ -248,7 +258,7 @@ final class Brain {
             Vector tv = vel(b, t); Vector away = t.getLocation().toVector().subtract(p.getLocation().toVector()).setY(0);
             boolean fleeing = away.lengthSquared() > 0.01 && tv.clone().setY(0).dot(away.normalize()) > 0.12;
             boolean webbedT = webbed(t);
-            double chance = god(b) ? (fleeing ? 25 : 100) : st.b("crit-spam") ? (fleeing ? 15 : 25 + 75 * sk) : 30 * sk;
+            double chance = (god(b) ? (fleeing ? 25 : 100) : st.b("crit-spam") ? (fleeing ? 15 : 25 + 75 * sk) : 30 * sk) + b.style.crit;
             b.critPlan = st.b("criticals") && !breakShield && !p.isInWater() && p.getLocation().getBlock().getType() != Material.COBWEB && (webbedT || roll(chance));
         }
         if (b.critPlan) {
@@ -264,12 +274,13 @@ final class Brain {
         if (b.lastAttack != before) b.needNext = god(b) ? 0.93 + rnd.nextDouble() * 0.07 : 0.85 + rnd.nextDouble() * 0.2;
         b.critWait = -1;
         if (breakShield && st.b("stun") && roll(30 + 70 * sk)) b.stunAt = now + 1;
-        if (sprintHit && st.b("s-tap") && roll(20 + 80 * sk)) b.tapTicks = 2 + rnd.nextInt(2);
+        if (sprintHit && st.b("s-tap") && (god(b) || roll(20 + 80 * sk + b.style.stap))) b.tapTicks = 2 + rnd.nextInt(2);
     }
 
     void approach(Bot b, LivingEntity t, double d, double range, long now) {
         Player p = b.p; double sk = skill(b);
-        range += b.prefRange;
+        range += b.prefRange * 0.5 + b.style.range;
+        if (b.style == Style.RUSHER && d > range) { b.forward = 1; run(b, true, now); }
         if (now < b.pauseUntil && d < range + 3) { b.forward = 0; b.strafe = 0; return; } // a human-like hesitation
         if (!god(b) && d < range + 2 && rnd.nextInt(140) == 0) b.pauseUntil = now + 3 + rnd.nextInt(8);
         if (d > range - 0.6) { b.forward = 1; run(b, d > 6, now); }
@@ -278,12 +289,12 @@ final class Brain {
         // strafe: random direction changes at random times, random strength
         if (now >= b.nextStrafeFlip) {
             if (rnd.nextInt(3) != 0) b.strafeDir = -b.strafeDir;
-            b.strafeAmt = (float) (0.25 + rnd.nextDouble() * (0.3 + 0.45 * sk));
-            b.nextStrafeFlip = now + 6 + rnd.nextInt(god(b) ? 18 : 30);
+            b.strafeAmt = (float) (b.style.strafe * (0.6 + rnd.nextDouble() * 0.6) * (0.6 + 0.5 * sk));
+            b.nextStrafeFlip = now + b.style.flipMin + rnd.nextInt(Math.max(1, b.style.flipMax - b.style.flipMin));
         }
         if (d < range + 2.5) b.strafe = (float) (b.strafeAmt * b.wobble) * b.strafeDir;
         // the odd random hop while circling
-        if (d < range + 2 && now >= b.nextHop && Nms.onGround(b.nms) && b.critWait < 0) { if (rnd.nextInt(4) == 0) b.jump = true; b.nextHop = now + 20 + rnd.nextInt(60); }
+        if (d < range + 2 && now >= b.nextHop && Nms.onGround(b.nms) && b.critWait < 0) { if (rnd.nextDouble() < b.style.hop * 2) b.jump = true; b.nextHop = now + 10 + rnd.nextInt(40); }
         // teamwork: spread around the target instead of stacking on one side
         if (st.b("teamwork") && d < 32) {
             List<Bot> sq = squad(b, t);
@@ -367,7 +378,7 @@ final class Brain {
             if (ground) vy = Math.min(0.4, vy / 2 + extra);
         }
         // jump reset: jump the moment you get hit to take less knockback
-        if (ground && st.b("jump-reset") && (god(b) || roll(85 * skill(b)))) { vy = 0.42; vx *= 0.65; vz *= 0.65; }
+        if (ground && st.b("jump-reset") && (god(b) || roll(85 * skill(b) + b.style.jumpReset))) { vy = 0.42; vx *= 0.65; vz *= 0.65; }
         p.setVelocity(new Vector(vx, vy, vz));
     }
 

@@ -25,19 +25,23 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     final Map<String, Bot> bots = new LinkedHashMap<>();
     final Set<String> pending = new HashSet<>();
     int spawnGen;
-    Store store; Brain brain; PvpCmd pvp;
+    Store store; Brain brain; PvpCmd pvp; SettingsGui gui;
+    /** names of bots that died: never used again */
+    final Set<String> graveyard = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
     long ticks;
     final Random rnd = new Random();
 
     @Override public void onEnable() {
         store = new Store(getDataFolder()); store.load(); store.saveAll();
-        brain = new Brain(this); pvp = new PvpCmd(this);
+        brain = new Brain(this); pvp = new PvpCmd(this); gui = new SettingsGui(store);
         Bukkit.getPluginManager().registerEvents(this, this);
+        Bukkit.getPluginManager().registerEvents(gui, this);
+        try { File g = new File(getDataFolder(), "graveyard.txt"); if (g.exists()) for (String l : java.nio.file.Files.readAllLines(g.toPath())) if (!l.isBlank()) graveyard.add(l.trim()); } catch (Exception ignored) {}
         getCommand("player").setExecutor(this); getCommand("player").setTabCompleter(this);
         getCommand("pvpbot").setExecutor(pvp); getCommand("pvpbot").setTabCompleter(pvp);
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 1L, 1L);
         Bukkit.getScheduler().runTaskLater(this, this::restore, 60L);
-        getLogger().info("CosmicBots 2.4 ready: /player and /pvpbot");
+        getLogger().info("CosmicBots 2.5 ready: /player and /pvpbot");
     }
     @Override public void onDisable() { saveBots(); for (Bot b : new ArrayList<>(bots.values())) Nms.remove(b.nms, "Server stopping"); bots.clear(); }
 
@@ -123,7 +127,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     }
     void saveBots() {
         YamlConfiguration y = new YamlConfiguration();
-        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); if (b.forced != null) y.set(b.name + ".forced", b.forced.toString()); }
+        for (Bot b : bots.values()) { y.set(b.name + ".loc", Store.str(b.p.getLocation())); y.set(b.name + ".home", Store.str(b.home)); if (b.path != null) y.set(b.name + ".path", b.path); y.set(b.name + ".mode", b.p.getGameMode().name()); if (b.skill > 0) y.set(b.name + ".skill", b.skill); y.set(b.name + ".style", b.style.name()); if (!b.targets.isEmpty()) y.set(b.name + ".targets", new ArrayList<>(b.targets)); if (b.forced != null) y.set(b.name + ".forced", b.forced.toString()); }
         try { y.save(new File(getDataFolder(), "bots.yml")); } catch (Exception ignored) {}
     }
     void restore() {
@@ -131,8 +135,8 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         int i = 0;
         for (String n : y.getKeys(false)) {
             Location l = Store.parse(y.getString(n + ".loc", "")); if (l == null) continue;
-            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets"); String fo = y.getString(n + ".forced");
-            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; b.targets.addAll(tg); try { if (fo != null) b.forced = UUID.fromString(fo); } catch (Exception ignored) {} } }, false), 5L * i++);
+            Location home = Store.parse(y.getString(n + ".home", "")); String path = y.getString(n + ".path"); GameMode gm = GameMode.valueOf(y.getString(n + ".mode", "SURVIVAL")); int sk = y.getInt(n + ".skill", -1); List<String> tg = y.getStringList(n + ".targets"); String fo = y.getString(n + ".forced"); Style sty = Style.of(y.getString(n + ".style", ""));
+            Bukkit.getScheduler().runTaskLater(this, () -> spawn(n, l, gm, null, b -> { if (b != null) { if (home != null) b.home = home; b.path = path; b.skill = sk; if (sty != null) b.style = sty; b.targets.addAll(tg); try { if (fo != null) b.forced = UUID.fromString(fo); } catch (Exception ignored) {} } }, false), 5L * i++);
         }
         if (i > 0) getLogger().info("Restoring " + i + " bots");
     }
@@ -304,6 +308,7 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
         b.revenge = null; b.blocking = false; b.antiMace = false; b.stunAt = -1; b.tapTicks = 0; b.eatTicks = 0; // targets + /pvpbot attack are kept
         if (ticks - b.spawnedAt < 200) getLogger().warning("Bot " + b.name + " died right after spawning: " + e.getDeathMessage());
         b.diedAt = ticks;
+        bury(b);
         if (store.b("bot-leave-on-death")) { Bukkit.getScheduler().runTaskLater(this, () -> { if (!b.removing) remove(b, "Died"); }, 1L); return; }
         Bukkit.getScheduler().runTaskLater(this, () -> {
             if (b.removing || bot(b.name) != b || !b.p.isOnline()) return; // removed meanwhile: don't bring it back
@@ -355,10 +360,22 @@ public final class CosmicBots extends JavaPlugin implements Listener, CommandExe
     // ================================================================= names
     static final String[] A = {"Dark", "Shadow", "Crimson", "Frost", "Storm", "Iron", "Night", "Blaze", "Void", "Silent", "Swift", "Ghost", "Wolf", "Raven", "Steel", "Ash"};
     static final String[] B = {"Blade", "Hunter", "Knight", "Fang", "Strike", "Reaper", "Slayer", "Archer", "Rider", "Walker", "Edge", "Claw", "Storm", "Heart", "Born", "Bane"};
+    void saveGraveyard() { try { java.nio.file.Files.write(new File(getDataFolder(), "graveyard.txt").toPath(), new ArrayList<>(graveyard)); } catch (Exception ignored) {} }
+    /** remember a dead bot's name and nickname so no bot ever gets them again */
+    void bury(Bot b) {
+        if (!store.b("graveyard")) return;
+        graveyard.add(b.name);
+        String nick = ChatColor.stripColor(b.p.getDisplayName());
+        if (nick != null && !nick.isBlank() && !nick.equalsIgnoreCase(b.name)) {
+            graveyard.add(nick);
+            if (Bukkit.getPluginManager().isPluginEnabled("NickPlugin")) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "randomizenick bury " + nick);
+        }
+        saveGraveyard();
+    }
     String randomName() {
         for (int k = 0; k < 50; k++) {
             String n = store.b("special-names") ? A[rnd.nextInt(A.length)] + B[rnd.nextInt(B.length)] + (rnd.nextInt(3) == 0 ? "" + rnd.nextInt(100) : "") : "Bot" + (1000 + rnd.nextInt(9000));
-            if (n.length() <= 16 && bot(n) == null && Bukkit.getPlayerExact(n) == null && !pending.contains(n.toLowerCase(Locale.ROOT))) return n;
+            if (n.length() <= 16 && bot(n) == null && Bukkit.getPlayerExact(n) == null && !pending.contains(n.toLowerCase(Locale.ROOT)) && !graveyard.contains(n)) return n;
         }
         return "Bot" + System.nanoTime() % 100000;
     }

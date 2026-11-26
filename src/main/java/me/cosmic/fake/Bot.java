@@ -45,4 +45,5 @@ final class Bot {
     // personality, so every bot plays a bit differently
     final double prefRange = -0.45 + Math.random() * 0.6, wobble = 0.6 + Math.random() * 0.8;
     double needNext = 0.95; long pauseUntil, diedAt = -1000;
+    Style style = Style.random();
 }

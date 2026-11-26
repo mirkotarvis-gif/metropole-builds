@@ -30,7 +30,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                 case "remove" -> { Bot b = need(s, a, 1); if (b != null) { pl.remove(b, "Removed"); s.sendMessage(G + "Removed " + b.name); } }
                 case "removeall" -> { for (org.bukkit.scheduler.BukkitTask t : spawning) t.cancel(); spawning.clear(); pl.spawnGen++; int n = pl.removeAll(); s.sendMessage(G + "Removed " + n + " bots"); }
                 case "reload" -> { st.load(); s.sendMessage(G + "Reloaded settings, factions, kits and paths"); }
-                case "list" -> s.sendMessage(Y + "Bots (" + pl.bots.size() + "): " + W + (pl.bots.isEmpty() ? "none" : String.join(", ", names())));
+                case "list" -> { s.sendMessage(Y + "Bots (" + pl.bots.size() + "):"); for (Bot b : pl.bots.values()) { Store.Faction f = st.factionOf(b.name); s.sendMessage(W + " " + b.name + D + " " + org.bukkit.ChatColor.stripColor(b.p.getDisplayName()) + " · " + b.style.name().toLowerCase(Locale.ROOT) + " · skill " + (b.skill > 0 ? b.skill : st.i("skill")) + (f != null ? " · " + f.name : "")); } }
                 case "inventory" -> { Bot b = need(s, a, 1); if (b != null && s instanceof Player p) p.openInventory(b.p.getInventory()); }
                 case "mass-spawn" -> {
                     int n = Integer.parseInt(a[1]); int max = st.i("max-mass-spawn");
@@ -58,6 +58,15 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
                 case "attack" -> { Bot b = need(s, a, 1); Entity t = entity(a[2]); if (b == null) return true; if (t == null) { s.sendMessage(R + "No target " + a[2]); return true; } b.forced = t.getUniqueId(); s.sendMessage(G + b.name + " attacks " + a[2]); }
                 case "stop-attack" -> { Bot b = need(s, a, 1); if (b != null) { b.forced = null; b.revenge = null; s.sendMessage(G + b.name + " stopped attacking"); } }
                 case "target", "targets" -> target(s, a);
+                case "gui", "menu" -> { if (s instanceof Player p) pl.gui.open(p, 0); else s.sendMessage(R + "Players only"); }
+                case "style", "styles" -> style(s, a);
+                case "war" -> war(s, a);
+                case "graveyard" -> {
+                    String op = a.length > 1 ? a[1].toLowerCase(Locale.ROOT) : "list";
+                    if (op.equals("clear")) { int n = pl.graveyard.size(); pl.graveyard.clear(); pl.saveGraveyard(); if (Bukkit.getPluginManager().isPluginEnabled("NickPlugin")) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "randomizenick graveyard clear"); s.sendMessage(G + "Graveyard cleared (" + n + " names free)"); }
+                    else if (op.equals("remove") && a.length > 2) { pl.graveyard.remove(a[2]); pl.saveGraveyard(); if (Bukkit.getPluginManager().isPluginEnabled("NickPlugin")) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), "randomizenick graveyard remove " + a[2]); s.sendMessage(G + a[2] + " can be used again"); }
+                    else s.sendMessage(D + "☠ Graveyard (" + pl.graveyard.size() + "): " + W + (pl.graveyard.isEmpty() ? "empty" : String.join(", ", new ArrayList<>(pl.graveyard).subList(0, Math.min(80, pl.graveyard.size())))));
+                }
                 case "difficulty", "skill" -> difficulty(s, a);
                 case "faction" -> faction(s, a);
                 case "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random" -> kit(s, a, 0);
@@ -98,6 +107,68 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             }
         }
         pl.saveBots();
+    }
+    void style(CommandSender s, String[] a) {
+        if (a.length < 3) {
+            s.sendMessage(Y + "/pvpbot style <bot|all|faction> <style|random>");
+            for (Style v : Style.values()) s.sendMessage(W + " " + v.name().toLowerCase(Locale.ROOT) + D + " - " + v.desc);
+            return;
+        }
+        List<Bot> bs = pick(s, a[1]); if (bs.isEmpty()) return;
+        Style v = Style.of(a[2]);
+        if (v == null && !a[2].equalsIgnoreCase("random")) { s.sendMessage(R + "Unknown style " + a[2]); return; }
+        for (Bot b : bs) b.style = v != null ? v : Style.random();
+        pl.saveBots();
+        s.sendMessage(G + bs.size() + " bot(s) now play " + W + (v != null ? v.name().toLowerCase(Locale.ROOT) : "random styles"));
+    }
+    /** /pvpbot war <A> <B> | stop <A> <B> | spawn <A> <B> <count each> [kitA] [kitB] */
+    void war(CommandSender s, String[] a) {
+        if (a.length < 3) { s.sendMessage(Y + "/pvpbot war <teamA> <teamB>" + D + " start a war"); s.sendMessage(Y + "/pvpbot war stop <teamA> <teamB>"); s.sendMessage(Y + "/pvpbot war spawn <teamA> <teamB> <bots each> [kitA] [kitB]" + D + " (look at a spot, teams spawn on both sides)"); return; }
+        if (a[1].equalsIgnoreCase("stop") && a.length >= 4) {
+            Store.Faction x = st.factions.get(a[2].toLowerCase(Locale.ROOT)), y = st.factions.get(a[3].toLowerCase(Locale.ROOT));
+            if (x == null || y == null) { s.sendMessage(R + "No such team"); return; }
+            x.hostile.remove(y.name.toLowerCase(Locale.ROOT)); y.hostile.remove(x.name.toLowerCase(Locale.ROOT)); st.saveFactions();
+            for (Bot b : pl.bots.values()) { b.revenge = null; b.forced = null; }
+            Bukkit.broadcastMessage("§7§l☮ §f" + x.name + " §7and §f" + y.name + " §7are at peace.");
+            return;
+        }
+        boolean spawn = a[1].equalsIgnoreCase("spawn");
+        int o = spawn ? 2 : 1;
+        if (a.length < o + 2) { s.sendMessage(R + "Name two teams"); return; }
+        String an = a[o], bn = a[o + 1];
+        Store.Faction x = st.factions.computeIfAbsent(an.toLowerCase(Locale.ROOT), k -> new Store.Faction(an));
+        Store.Faction y = st.factions.computeIfAbsent(bn.toLowerCase(Locale.ROOT), k -> new Store.Faction(bn));
+        x.hostile.add(y.name.toLowerCase(Locale.ROOT)); y.hostile.add(x.name.toLowerCase(Locale.ROOT)); st.saveFactions();
+        if (spawn) {
+            if (!(s instanceof Player p)) { s.sendMessage(R + "Players only"); return; }
+            int n = a.length > o + 2 ? Math.max(1, Math.min((int) st.d("max-mass-spawn"), Integer.parseInt(a[o + 2]))) : 5;
+            String ka = a.length > o + 3 ? a[o + 3] : null, kb = a.length > o + 4 ? a[o + 4] : ka;
+            org.bukkit.block.Block look = p.getTargetBlockExact(80);
+            Location mid = look != null ? look.getLocation().add(0.5, 1, 0.5) : p.getLocation();
+            org.bukkit.util.Vector side = p.getLocation().getDirection().setY(0);
+            if (side.lengthSquared() < 0.01) side = new org.bukkit.util.Vector(1, 0, 0);
+            side.normalize().rotateAroundY(Math.PI / 2).multiply(12);
+            spawnTeam(s, x, mid.clone().add(side), n, ka);
+            spawnTeam(s, y, mid.clone().subtract(side), n, kb);
+        }
+        Bukkit.broadcastMessage("§4§l⚔ WAR §c" + x.name + " §7vs §c" + y.name);
+        for (Player pp : Bukkit.getOnlinePlayers()) pp.playSound(pp.getLocation(), org.bukkit.Sound.EVENT_RAID_HORN, 1f, 1f);
+    }
+    void spawnTeam(CommandSender s, Store.Faction f, Location at, int n, String kit) {
+        ItemStack[] k = kit == null ? null : st.kits.get(kit.toLowerCase(Locale.ROOT));
+        if (kit != null && k == null) s.sendMessage(R + "No kit " + kit + D + " (spawning without it)");
+        for (int i = 0; i < n; i++) {
+            final int idx = i;
+            spawning.add(Bukkit.getScheduler().runTaskLater(pl, () -> {
+                double an = idx * 2.4, r = 1.5 + Math.sqrt(idx) * 1.4;
+                pl.spawn(pl.randomName(), at.clone().add(Math.cos(an) * r, 0, Math.sin(an) * r), GameMode.SURVIVAL, null, b -> {
+                    if (b == null) return;
+                    for (Store.Faction o2 : st.factions.values()) o2.members.removeIf(m -> m.equalsIgnoreCase(b.name));
+                    f.members.add(b.name); st.saveFactions();
+                    if (k != null) giveKit(b.p, k);
+                });
+            }, 2L * i));
+        }
     }
     static int level(String v) {
         return switch (v.toLowerCase(Locale.ROOT)) {
@@ -288,6 +359,9 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         s.sendMessage(Y + "§lPvP Bots");
         s.sendMessage(D + "/pvpbot spawn [name] | remove <name> | removeall | list | inventory <name> | mass-spawn <n> | stop-spawn | reload");
         s.sendMessage(D + "/pvpbot attack <bot> <target> | stop-attack <bot>");
+        s.sendMessage(D + "/pvpbot gui" + W + " settings menu");
+        s.sendMessage(D + "/pvpbot war <teamA> <teamB> | war stop <A> <B> | war spawn <A> <B> <count> [kitA] [kitB]");
+        s.sendMessage(D + "/pvpbot style <bot|all|faction> <style|random>  |  /pvpbot graveyard [clear|remove <name>]");
         s.sendMessage(D + "/pvpbot target <bot|all|faction> add|set|remove|clear|list [players...]");
         s.sendMessage(D + "/pvpbot difficulty <bot|all|faction|default> <1-100|easy|normal|hard|ht1|marlowww|reset>");
         s.sendMessage(D + "/pvpbot faction list|create|delete|info|add|remove|add-near|add-all|hostile|attack|give|tp|path|kit");
@@ -304,7 +378,7 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
         if (a.length > 1 && a[0].equalsIgnoreCase("bot-management")) { if (a.length == 2) { out.addAll(List.of("list", "inventory", "mass-spawn", "stop-spawn", "attack", "stop-attack")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         if (a.length > 1 && a[0].equalsIgnoreCase("kit")) { if (a.length == 2) { out.addAll(List.of("create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random")); String l = a[1].toLowerCase(Locale.ROOT); out.removeIf(x -> !x.startsWith(l)); return out; } a = Arrays.copyOfRange(a, 1, a.length); }
         String a0 = a[0].toLowerCase(Locale.ROOT);
-        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "mass-spawn", "stop-spawn", "attack", "stop-attack", "target", "difficulty", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
+        if (a.length == 1) out.addAll(List.of("bot-management", "kit", "spawn", "remove", "removeall", "reload", "list", "inventory", "gui", "war", "style", "graveyard", "mass-spawn", "stop-spawn", "attack", "stop-attack", "target", "difficulty", "faction", "create-kit", "delete-kit", "kits", "give-kit", "give-kit-near", "give-kit-near-random", "path", "settings"));
         else if (a.length == 2) switch (a0) {
             case "remove", "inventory", "attack", "stop-attack" -> out.addAll(bots);
             case "faction" -> out.addAll(List.of("list", "create", "delete", "info", "add", "remove", "add-near", "add-all", "hostile", "attack", "give", "tp", "path", "kit"));
@@ -341,6 +415,9 @@ final class PvpCmd implements CommandExecutor, TabCompleter {
             default -> {}
         }
         else if (a.length >= 5 && a0.equals("faction")) { if (a[1].equalsIgnoreCase("path")) out.addAll(paths); else if (a[1].equalsIgnoreCase("kit")) out.addAll(kits); else if (a[1].equalsIgnoreCase("hostile")) out.addAll(List.of("true", "false")); }
+        if (a0.equals("style")) { out.clear(); if (a.length == 2) { out.addAll(bots); out.add("all"); out.addAll(facs); } else if (a.length == 3) { for (Style v : Style.values()) out.add(v.name().toLowerCase(Locale.ROOT)); out.add("random"); } }
+        if (a0.equals("war")) { out.clear(); if (a.length == 2) { out.add("stop"); out.add("spawn"); out.addAll(facs); } else if (a.length <= 4) out.addAll(facs); else out.addAll(st.kits.keySet()); }
+        if (a0.equals("graveyard") && a.length == 2) { out.clear(); out.addAll(List.of("list", "clear", "remove")); }
         if (a0.equals("target") || a0.equals("difficulty")) {
             out.clear();
             if (a.length == 2) { out.addAll(bots); out.add("all"); out.addAll(facs); if (a0.equals("difficulty")) out.add("default"); }
