@@ -247,7 +247,8 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
                 case 4: n = "The" + A + B; break;
                 default: n = a + b + (rng.nextInt(9000) + 1000); break;
             }
-            if (n.length() >= 8 && n.length() <= 16) return n;
+            if (n.length() >= 10 && n.length() <= 16) return n;
+            if (n.length() >= 8 && n.length() <= 16 && tries > 35) return n;
         }
         return "cosmic" + (rng.nextInt(9000) + 1000);
     }
@@ -343,7 +344,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
                 List<String[]> found = bulk(cands);
                 if (found == null) { getLogger().warning("Mojang name lookups are failing right now (rate limit or blocked network), retrying in 10s"); break; }
                 for (String[] f : found) {
-                    if (f[1].length() < 8 || inPool(f[1]) || nameTaken(f[1])) continue;
+                    if (f[1].length() < 9 || inPool(f[1]) || nameTaken(f[1])) continue;
                     String[] r = skinOf(f[0], f[1]);
                     if (r != null && r[1] != null) pool.add(r);
                     try { Thread.sleep(100); } catch (InterruptedException ignored) { }
@@ -354,10 +355,12 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         } finally { filling.set(false); }
     }
 
-    private String[] takeFromPool() {
-        String[] e;
-        while ((e = pool.pollFirst()) != null) if (!nameTaken(e[0])) return e;
-        return null;
+    /** hands out the longest name that's ready */
+    private synchronized String[] takeFromPool() {
+        String[] best = null;
+        for (String[] e : pool) if (!nameTaken(e[0]) && (best == null || e[0].length() > best[0].length())) best = e;
+        if (best != null) pool.remove(best);
+        return best;
     }
 
     private void applyPick(Player p, String[] pick, CommandSender reportTo) {
@@ -480,6 +483,9 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         return c;
     }
 
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onDeathLate(PlayerDeathEvent e) { e.deathMessage(swapNames(e.deathMessage(), e.getPlayer())); }
+
     @EventHandler(priority = EventPriority.HIGHEST)
     public void onDeath(PlayerDeathEvent e) { e.deathMessage(swapNames(e.deathMessage(), e.getPlayer())); }
 
@@ -489,7 +495,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     @EventHandler(priority = EventPriority.HIGH)
     public void onJoinMsg(PlayerJoinEvent e) { e.joinMessage(swapNames(e.joinMessage(), e.getPlayer())); }
 
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.MONITOR)
     public void onQuitMsg(PlayerQuitEvent e) { e.quitMessage(swapNames(e.quitMessage(), e.getPlayer())); }
 
     @EventHandler
