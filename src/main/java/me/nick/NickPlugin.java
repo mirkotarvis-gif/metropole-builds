@@ -80,6 +80,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         Bukkit.getPluginManager().registerEvents(this, this);
         for (Player p : Bukkit.getOnlinePlayers()) { rememberOriginalSkin(p); apply(p); applySavedSkin(p); }
         Bukkit.getScheduler().runTaskTimer(this, this::tick, 20L, 5L);
+        loadDead();
         poolFile = new File(getDataFolder(), "name-pool.txt");
         loadPool();
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::refill, 40L, 200L);
@@ -253,8 +254,24 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         return "cosmic" + (rng.nextInt(9000) + 1000);
     }
 
+    /** names of bots that died: never handed out again */
+    private final Set<String> dead = ConcurrentHashMap.newKeySet();
+    private File deadFile;
+    private void loadDead() {
+        deadFile = new File(getDataFolder(), "dead-names.txt");
+        if (!deadFile.exists()) return;
+        try { for (String l : java.nio.file.Files.readAllLines(deadFile.toPath(), StandardCharsets.UTF_8)) if (!l.isBlank()) dead.add(l.trim().toLowerCase()); } catch (IOException e) { getLogger().warning("dead names: " + e); }
+    }
+    private void saveDead() {
+        try { java.nio.file.Files.write(deadFile.toPath(), new TreeSet<>(dead), StandardCharsets.UTF_8); } catch (IOException e) { getLogger().warning("dead names: " + e); }
+    }
+    private void bury(String n) {
+        if (n == null || n.isBlank()) return;
+        if (dead.add(n.toLowerCase())) { pool.removeIf(e -> e[0].equalsIgnoreCase(n)); saveDead(); }
+    }
+
     private boolean nameTaken(String n) {
-        if (reserved.contains(n.toLowerCase())) return true;
+        if (reserved.contains(n.toLowerCase()) || dead.contains(n.toLowerCase())) return true;
         for (Player p : Bukkit.getOnlinePlayers()) {
             if (p.getName().equalsIgnoreCase(n)) return true;
             String k = nickOf(p);
@@ -541,6 +558,16 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     }
 
     private boolean randomCmd(CommandSender s, String[] a) {
+        if (a.length >= 1 && (a[0].equalsIgnoreCase("bury") || a[0].equalsIgnoreCase("graveyard") || a[0].equalsIgnoreCase("dead"))) {
+            if (a[0].equalsIgnoreCase("bury")) { if (a.length < 2) { s.sendMessage("§e/randomizenick bury <name>"); return true; } bury(a[1]); s.sendMessage("§7" + a[1] + " is now dead, it won't be given out again."); return true; }
+            String op = a.length > 1 ? a[1].toLowerCase() : "list";
+            switch (op) {
+                case "clear" -> { int n = dead.size(); dead.clear(); saveDead(); s.sendMessage("§aGraveyard cleared (" + n + " names free again)."); }
+                case "remove" -> { if (a.length < 3) { s.sendMessage("§e/randomizenick graveyard remove <name>"); return true; } boolean r = dead.remove(a[2].toLowerCase()); saveDead(); s.sendMessage(r ? "§a" + a[2] + " can be used again." : "§c" + a[2] + " isn't in the graveyard."); }
+                default -> { List<String> l = new ArrayList<>(new TreeSet<>(dead)); s.sendMessage("§8☠ §7Graveyard (" + l.size() + "): §f" + (l.isEmpty() ? "empty" : String.join("§7, §f", l.subList(0, Math.min(80, l.size()))) + (l.size() > 80 ? " §7..." : ""))); }
+            }
+            return true;
+        }
         if (a.length == 0) {
             int n = 0;
             for (Player p : Bukkit.getOnlinePlayers()) if (!isBypassed(p)) { randomize(p, s); n++; }
@@ -590,7 +617,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         String q = a[a.length - 1].toLowerCase();
         List<String> opts = new ArrayList<>();
         if (c.getName().equalsIgnoreCase("randomizenick")) {
-            if (a.length == 1) { opts.add("clear"); opts.add("bypass"); for (Player p : Bukkit.getOnlinePlayers()) opts.add(p.getName()); }
+            if (a.length == 1) { opts.add("clear"); opts.add("bypass"); opts.add("graveyard"); opts.add("bury"); for (Player p : Bukkit.getOnlinePlayers()) opts.add(p.getName()); }
             else if (a.length == 2 && a[0].equalsIgnoreCase("bypass")) { opts.add("list"); for (Player p : Bukkit.getOnlinePlayers()) opts.add(p.getName()); }
         } else {
             if (a.length == 1) { opts.add("clear"); for (Player p : Bukkit.getOnlinePlayers()) opts.add(p.getName()); }
