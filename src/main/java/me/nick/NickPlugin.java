@@ -436,18 +436,54 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         Map<String, String> map = new LinkedHashMap<>();
         if (extra != null) { String n = nickOf(extra); if (n != null) map.put(extra.getName(), n); }
         for (Player p : Bukkit.getOnlinePlayers()) { String n = nickOf(p); if (n != null) map.put(p.getName(), n); }
-        for (Map.Entry<String, String> en : map.entrySet()) {
-            if (en.getKey().equals(en.getValue())) continue;
-            Pattern pat = Pattern.compile("(?<![A-Za-z0-9_])" + Pattern.quote(en.getKey()) + "(?![A-Za-z0-9_])");
-            c = c.replaceText(TextReplacementConfig.builder().match(pat).replacement(en.getValue()).build());
+        map.entrySet().removeIf(en -> en.getKey().equals(en.getValue()));
+        if (map.isEmpty()) return c;
+        return deep(c, map, 0);
+    }
+
+    private static String swapStr(String s, Map<String, String> map) {
+        if (s == null) return null;
+        for (Map.Entry<String, String> en : map.entrySet())
+            s = s.replaceAll("(?<![A-Za-z0-9_])" + Pattern.quote(en.getKey()) + "(?![A-Za-z0-9_])", Matcher.quoteReplacement(en.getValue()));
+        return s;
+    }
+
+    /** walks the whole message: plain text, translation arguments (death/advancement names live there), children, hover, click, insertion */
+    @SuppressWarnings("deprecation")
+    private Component deep(Component c, Map<String, String> map, int depth) {
+        if (c == null || depth > 30) return c;
+        if (c instanceof net.kyori.adventure.text.TextComponent tc) c = tc.content(swapStr(tc.content(), map));
+        if (c instanceof net.kyori.adventure.text.TranslatableComponent tr && !tr.args().isEmpty()) {
+            List<Component> args = new ArrayList<>();
+            for (Component a : tr.args()) args.add(deep(a, map, depth + 1));
+            c = tr.args(args);
+        }
+        net.kyori.adventure.text.event.HoverEvent<?> hv = c.hoverEvent();
+        if (hv != null) {
+            if (hv.action() == net.kyori.adventure.text.event.HoverEvent.Action.SHOW_TEXT)
+                c = c.hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(deep((Component) hv.value(), map, depth + 1)));
+            else if (hv.action() == net.kyori.adventure.text.event.HoverEvent.Action.SHOW_ENTITY) {
+                net.kyori.adventure.text.event.HoverEvent.ShowEntity se = (net.kyori.adventure.text.event.HoverEvent.ShowEntity) hv.value();
+                if (se.name() != null) c = c.hoverEvent(net.kyori.adventure.text.event.HoverEvent.showEntity(se.name(deep(se.name(), map, depth + 1))));
+            }
+        }
+        net.kyori.adventure.text.event.ClickEvent ce = c.clickEvent();
+        if (ce != null && ce.action() == net.kyori.adventure.text.event.ClickEvent.Action.SUGGEST_COMMAND) {
+            // keep /tell working: it needs the real name, so leave the command but nothing visible shows it
+        }
+        if (c.insertion() != null) c = c.insertion(null);
+        if (!c.children().isEmpty()) {
+            List<Component> kids = new ArrayList<>();
+            for (Component k : c.children()) kids.add(deep(k, map, depth + 1));
+            c = c.children(kids);
         }
         return c;
     }
 
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onDeath(PlayerDeathEvent e) { e.deathMessage(swapNames(e.deathMessage(), e.getPlayer())); }
 
-    @EventHandler(priority = EventPriority.HIGH)
+    @EventHandler(priority = EventPriority.HIGHEST)
     public void onAdvancement(PlayerAdvancementDoneEvent e) { e.message(swapNames(e.message(), e.getPlayer())); }
 
     @EventHandler(priority = EventPriority.HIGH)
