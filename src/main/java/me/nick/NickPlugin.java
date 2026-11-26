@@ -88,6 +88,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     @Override
     public void onDisable() {
         savePool();
+        lookups.shutdownNow();
         for (TextDisplay d : tags.values()) if (d != null && d.isValid()) d.remove();
         tags.clear();
     }
@@ -298,11 +299,26 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         String res = null;
         try { res = post("https://api.minecraftservices.com/minecraft/profile/lookup/bulk/byname", body); } catch (Exception ignored) { }
         if (res == null) try { res = post("https://api.mojang.com/profiles/minecraft", body); } catch (Exception ignored) { }
-        if (res == null) return null;
+        if (res == null) return single(names); // bulk endpoint refused: check them one by one (in parallel)
         List<String[]> out = new ArrayList<>();
         Matcher m = Pattern.compile("\\{[^{}]*\\}").matcher(res);
         while (m.find()) { String o = m.group(), id = field(o, "id"), n = field(o, "name"); if (id != null && n != null) out.add(new String[]{id, n}); }
         return out;
+    }
+
+    private final java.util.concurrent.ExecutorService lookups = java.util.concurrent.Executors.newFixedThreadPool(6, r -> { Thread t = new Thread(r, "NickPlugin-lookup"); t.setDaemon(true); return t; });
+    private List<String[]> single(List<String> names) {
+        List<java.util.concurrent.Future<String[]>> fs = new ArrayList<>();
+        for (String n : names) fs.add(lookups.submit(() -> {
+            String prof = get("https://api.mojang.com/users/profiles/minecraft/" + n);
+            if (prof == null) prof = get("https://api.minecraftservices.com/minecraft/profile/lookup/name/" + n);
+            if (prof == null) return null;
+            String id = field(prof, "id"), nm = field(prof, "name");
+            return id == null || nm == null ? null : new String[]{id, nm};
+        }));
+        List<String[]> out = new ArrayList<>(); int fails = 0;
+        for (java.util.concurrent.Future<String[]> f : fs) { try { String[] r = f.get(10, java.util.concurrent.TimeUnit.SECONDS); if (r != null) out.add(r); } catch (Exception e) { fails++; } }
+        return fails == names.size() ? null : out;
     }
 
     /** {name, skinValue, skinSignature} for an account id, skin null if it uses a default skin */
@@ -325,7 +341,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
                 List<String> cands = new ArrayList<>();
                 while (cands.size() < 10) { String n = randomCandidate(); if (n.length() >= 8 && n.length() <= 16 && !cands.contains(n)) cands.add(n); }
                 List<String[]> found = bulk(cands);
-                if (found == null) break; // rate limited, try again later
+                if (found == null) { getLogger().warning("Mojang name lookups are failing right now (rate limit or blocked network), retrying in 10s"); break; }
                 for (String[] f : found) {
                     if (f[1].length() < 8 || inPool(f[1]) || nameTaken(f[1])) continue;
                     String[] r = skinOf(f[0], f[1]);
@@ -334,7 +350,7 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
                 }
                 try { Thread.sleep(300); } catch (InterruptedException ignored) { }
             }
-            if (pool.size() != before) savePool();
+            if (pool.size() != before) { savePool(); getLogger().info("Name pool: " + pool.size() + " ready"); }
         } finally { filling.set(false); }
     }
 
@@ -364,7 +380,12 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
             Bukkit.getScheduler().runTaskAsynchronously(this, () -> { savePool(); refill(); });
             return;
         }
-        if (reportTo != null) reportTo.sendMessage("§7Name pool is empty, looking one up for " + p.getName() + "...");
+        // pool empty: give a made-up name right now, then swap to a real account with a skin when one is found
+        String temp = null;
+        for (int i = 0; i < 20 && temp == null; i++) { String c = randomCandidate(); if (c.length() >= 8 && c.length() <= 16 && !nameTaken(c)) temp = c; }
+        if (temp != null) applyPick(p, new String[]{temp, null, null}, null);
+        final String tempName = temp;
+        if (reportTo != null) reportTo.sendMessage("§a" + p.getName() + " §7→ §f" + temp + " §7(name pool still filling, getting a skin...)");
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             String[] best = null;
             for (int round = 0; round < 6 && best == null; round++) {
@@ -385,7 +406,8 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
             Bukkit.getScheduler().runTask(this, () -> {
                 if (pick != null) reserved.remove(pick[0].toLowerCase());
                 if (!p.isOnline()) return;
-                if (pick == null) { if (reportTo != null) reportTo.sendMessage("§cCouldn't reach Mojang for " + p.getName() + " (rate limit?). Try again in a minute."); return; }
+                if (pick == null) { if (reportTo != null && tempName == null) reportTo.sendMessage("§cCouldn't reach Mojang for " + p.getName() + " (rate limit?). Try again in a minute."); return; }
+                if (tempName != null && !tempName.equals(nickOf(p))) return; // nick was changed meanwhile
                 applyPick(p, pick, reportTo);
             });
         });
