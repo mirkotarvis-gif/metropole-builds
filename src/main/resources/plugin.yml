@@ -1,0 +1,14 @@
+name: ProtagonistPlugin
+version: 2.0.0
+main: me.prot.ProtagonistPlugin
+api-version: '1.21'
+description: The protagonist's plot armor + signature move "Starfall".
+commands:
+  protagonist:
+    description: Manage protagonists
+    usage: /protagonist add|remove <player> | list | clear | charge [player] | starlight <player> <0-100> | starfall <on|off> | aura <on|off>
+    permission: protagonist.admin
+permissions:
+  protagonist.admin:
+    description: Manage the protagonist
+    default: op
