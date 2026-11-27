@@ -1,0 +1,13 @@
+name: KeepXP
+version: 1.0.0
+main: me.keepxp.KeepXP
+api-version: '1.21'
+description: You keep all your XP when you die.
+commands:
+  keepxp:
+    description: Turn keep-XP on or off
+    usage: /keepxp [on|off]
+    permission: keepxp.admin
+permissions:
+  keepxp.admin:
+    default: op
