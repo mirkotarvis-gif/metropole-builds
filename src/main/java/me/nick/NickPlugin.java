@@ -15,6 +15,10 @@ import net.kyori.adventure.text.TextReplacementConfig;
 import org.bukkit.event.entity.PlayerDeathEvent;
 import org.bukkit.event.player.PlayerAdvancementDoneEvent;
 import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerEditBookEvent;
+import org.bukkit.inventory.meta.BookMeta;
+import org.bukkit.potion.PotionEffectType;
+import org.bukkit.GameMode;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.event.player.PlayerTeleportEvent;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -136,8 +140,11 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         d.setPersistent(false);
         d.setText(nick);
         d.setBillboard(Display.Billboard.CENTER);
+        d.setDefaultBackground(true);   // same dark box as a real name tag
+        d.setSeeThrough(true);          // real name tags show through walls (unless sneaking)
+        d.setShadowed(false);
         Transformation tr = d.getTransformation();
-        d.setTransformation(new Transformation(new Vector3f(0f, 0.3f, 0f), tr.getLeftRotation(), tr.getScale(), tr.getRightRotation()));
+        d.setTransformation(new Transformation(new Vector3f(0f, (float) getConfig().getDouble("tag-offset", 0.27), 0f), tr.getLeftRotation(), tr.getScale(), tr.getRightRotation()));
         p.addPassenger(d);
         p.hideEntity(this, d);
         tags.put(p.getUniqueId(), d);
@@ -154,7 +161,12 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
             if (nick == null) continue;
             TextDisplay d = tags.get(p.getUniqueId());
             if (p.isDead()) { if (d != null) removeTag(p); continue; }
-            if (d == null || !d.isValid() || d.getVehicle() != p) { removeTag(p); spawnTag(p, nick); }
+            if (d == null || !d.isValid() || d.getVehicle() != p) { removeTag(p); spawnTag(p, nick); d = tags.get(p.getUniqueId()); if (d == null) continue; }
+            boolean hidden = p.hasPotionEffect(PotionEffectType.INVISIBILITY) || p.isInvisible() || p.getGameMode() == GameMode.SPECTATOR;
+            String want = hidden ? "" : nick;
+            if (!want.equals(d.getText())) { d.setText(want); d.setDefaultBackground(!hidden); }
+            boolean sneak = p.isSneaking();
+            if (d.isSeeThrough() == sneak) { d.setSeeThrough(!sneak); d.setTextOpacity(sneak ? (byte) 0x80 : (byte) -1); }
         }
     }
 
@@ -515,6 +527,17 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
     @EventHandler(priority = EventPriority.MONITOR)
     public void onQuitMsg(PlayerQuitEvent e) { e.quitMessage(swapNames(e.quitMessage(), e.getPlayer())); }
 
+    /** signing a book: "by <nick>" instead of the real name */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onSign(PlayerEditBookEvent e) {
+        if (!e.isSigning()) return;
+        String nick = nickOf(e.getPlayer());
+        if (nick == null) return;
+        BookMeta m = e.getNewBookMeta();
+        m.setAuthor(nick);
+        e.setNewBookMeta(m);
+    }
+
     @EventHandler
     public void onJoin(PlayerJoinEvent e) {
         Player p = e.getPlayer();
@@ -535,6 +558,12 @@ public final class NickPlugin extends JavaPlugin implements CommandExecutor, Tab
         if (!s.hasPermission("nick.use")) { s.sendMessage("§cNo permission."); return true; }
         if (c.getName().equalsIgnoreCase("randomizenick")) return randomCmd(s, a);
 
+        if (a.length >= 1 && a[0].equalsIgnoreCase("tagheight")) {
+            if (a.length == 2) try { getConfig().set("tag-offset", Double.parseDouble(a[1])); saveConfig(); } catch (NumberFormatException ex) { s.sendMessage("§cUse a number like 0.27"); return true; }
+            for (Player p : Bukkit.getOnlinePlayers()) if (nickOf(p) != null) { removeTag(p); spawnTag(p, nickOf(p)); }
+            s.sendMessage("§eName tag height: §f" + getConfig().getDouble("tag-offset", 0.27) + " §7(higher number = higher tag, default 0.27)");
+            return true;
+        }
         if (a.length != 2) { s.sendMessage("§eUsage: §f/nick <player> <newname> §7| §f/nick clear <player>"); return true; }
         if (a[0].equalsIgnoreCase("clear")) {
             Player t = find(a[1]);
