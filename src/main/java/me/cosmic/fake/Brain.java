@@ -56,7 +56,17 @@ final class Brain {
                 return;
             }
         }
-        if (t != null) { fight(b, t, now); return; }
+        if (t != null) {
+            if (b.lastFoe == null || !b.lastFoe.getUniqueId().equals(t.getUniqueId())) b.fightStart = now;
+            b.lastFoe = t; b.lastFoeAt = now; b.killSpot = null; if (p.isSneaking()) p.setSneaking(false);
+            fight(b, t, now); return;
+        }
+        if (b.lastFoe != null) {
+            if (b.lastFoe.isDead() && now - b.lastFoeAt < 40) { b.killSpot = b.lastFoe.getLocation().clone(); b.killAt = now; }
+            b.lastFoe = null; b.fightStart = 0;
+        }
+        if (afterKill(b, now)) return;
+        if (st.b("look-around") && b.path == null) lookAround(b, now);
         if (b.blocking) { Nms.stopUsing(b.nms); b.blocking = false; b.antiMace = false; }
         if (b.path != null) { walkPath(b, now); return; }
         if (st.b("idle")) idle(b, now);
@@ -169,7 +179,9 @@ final class Brain {
             if (st.b("cobwebs") && d < 3.5) cobweb(b, t, now);
             Vector away = p.getLocation().toVector().subtract(t.getLocation().toVector()).setY(0);
             if (away.lengthSquared() < 0.01) away = new Vector(1, 0, 0);
-            face(b, p.getLocation().clone().add(away.normalize().multiply(5)).add(0, 1.6, 0), aimStep(b) * 2);
+            if (st.b("glance-back") && !god(b) && now >= b.nextGlance) { b.glanceUntil = now + 4 + rnd.nextInt(4); b.nextGlance = now + 18 + rnd.nextInt(25); }
+            if (now < b.glanceUntil) face(b, t.getEyeLocation(), aimStep(b) * 2);
+            else face(b, p.getLocation().clone().add(away.normalize().multiply(5)).add(0, 1.6, 0), aimStep(b) * 2);
             run(b, true, now);
             if (st.b("auto-shield") && d < 4) shield(b, now, 20);
             return;
@@ -250,12 +262,16 @@ final class Brain {
         approach(b, t, d, range, now);
         // s-tap: tap S for a couple of ticks after a sprint hit, then sprint back in
         if (b.tapTicks > 0) { b.tapTicks--; b.forward = -1; p.setSprinting(false); }
+        else if (b.wtapTicks > 0) { b.wtapTicks--; b.forward = 0; p.setSprinting(false); }
         // stun web: drop a web under them when they're close
         if (st.b("stun-web") && d < 3.2 && now - b.lastCobweb > 160 - 80 * sk && roll(3 + 5 * sk)) webUnder(b, t, now);
         if (d > range) { b.critWait = -1; return; }
         double need = god(b) ? b.needNext : Math.min(1, (0.55 + 0.4 * sk) * b.needNext); // varies every swing
         boolean ready = p.getAttackCooldown() >= need && now - b.lastAttack >= st.i("attack-cooldown");
-        if (!ready) return;
+        if (!ready) {
+            if (st.b("air-swings") && !god(b) && d < range + 1.5 && b.critWait < 0 && roll(st.d("air-swing-chance") * (b.p.getHealth() < maxHp(b.p) * 0.3 && st.b("panic") ? 2.5 : 1))) p.swingMainHand();
+            return;
+        }
         // crit spam: jump, hit on the way down
         if (b.critWait < 0) {
             // crit spam unless they're running away (then sprint-hit + s-tap to keep up)
@@ -275,10 +291,13 @@ final class Brain {
         boolean sprintHit = p.isSprinting();
         long before = b.lastAttack;
         hit(b, t, now);
-        if (b.lastAttack != before) b.needNext = god(b) ? 0.93 + rnd.nextDouble() * 0.07 : 0.85 + rnd.nextDouble() * 0.2;
+        if (b.lastAttack != before) b.needNext = god(b) ? 0.93 + rnd.nextDouble() * 0.07 : (st.b("panic") && p.getHealth() < maxHp(p) * 0.3 ? 0.6 + rnd.nextDouble() * 0.3 : 0.85 + rnd.nextDouble() * 0.2);
         b.critWait = -1;
         if (breakShield && st.b("stun") && roll(30 + 70 * sk)) b.stunAt = now + 1;
-        if (sprintHit && st.b("s-tap") && (god(b) || roll(20 + 80 * sk + b.style.stap))) b.tapTicks = 2 + rnd.nextInt(2);
+        if (sprintHit && (st.b("s-tap") || st.b("w-tap")) && (god(b) || roll(20 + 80 * sk + b.style.stap))) {
+            boolean w = st.b("w-tap") && (!st.b("s-tap") || rnd.nextBoolean());
+            if (w) b.wtapTicks = 1 + rnd.nextInt(2); else b.tapTicks = 2 + rnd.nextInt(2);
+        }
     }
 
     void approach(Bot b, LivingEntity t, double d, double range, long now) {
@@ -345,6 +364,9 @@ final class Brain {
     }
     void hit(Bot b, LivingEntity t, long now) {
         Player p = b.p;
+        Material held = p.getInventory().getItemInMainHand().getType();
+        if (held != b.lastHeld) { b.lastHeld = held; if (st.b("hotbar-delay") && !god(b)) b.switchReady = now + 1 + rnd.nextInt(2 + (int) ((1 - skill(b)) * 4)); }
+        if (now < b.switchReady) return;
         if (!looking(b, t, st.d("melee-range"))) return; // keep turning, no silent aim
         Block wall = blocker(b, t);
         if (wall != null) { // can't hit through it: cut the web like a player would, otherwise just swing
@@ -778,14 +800,52 @@ final class Brain {
         if (b.lastPos != null && b.lastPos.getWorld().equals(l.getWorld()) && b.lastPos.distanceSquared(l) < 0.002 && b.forward != 0) { if (++b.stuck > 8) { b.jump = true; b.stuck = 0; b.strafe = rnd.nextBoolean() ? 1 : -1; } } else b.stuck = 0;
         b.lastPos = l.clone();
     }
+    /** after a kill: maybe crouch spam over them, then walk over the loot */
+    boolean afterKill(Bot b, long now) {
+        if (b.killSpot == null) return false;
+        Player p = b.p; long since = now - b.killAt;
+        if (since > 140 || !b.killSpot.getWorld().equals(p.getWorld())) { b.killSpot = null; p.setSneaking(false); return false; }
+        if (st.b("taunt") && since < 30) { p.setSneaking((since / 3) % 2 == 0); face(b, b.killSpot.clone().add(0, 0.2, 0), aimStep(b)); return true; }
+        if (p.isSneaking()) p.setSneaking(false);
+        if (!st.b("loot-after-kill")) { b.killSpot = null; return false; }
+        double d = flat(p.getLocation(), b.killSpot);
+        if (d < 0.8) { if (since > 60) b.killSpot = null; return true; }
+        face(b, b.killSpot.clone().add(0, 0.5, 0), aimStep(b)); b.forward = 1; run(b, d > 4, now);
+        return true;
+    }
+    /** idle: glance at nearby players or just look around now and then */
+    void lookAround(Bot b, long now) {
+        Player p = b.p;
+        if (now >= b.lookUntil) {
+            b.lookUntil = now + 30 + rnd.nextInt(90);
+            Player near = null; double nd = 12;
+            for (Player o : p.getWorld().getPlayers()) if (o != p && !pl.isBot(o) && o.getGameMode() != GameMode.SPECTATOR) { double dd = dist(p, o); if (dd < nd) { nd = dd; near = o; } }
+            if (near != null && rnd.nextInt(3) != 0) b.lookGoal = near.getEyeLocation();
+            else { double yaw = Math.toRadians(p.getLocation().getYaw() + rnd.nextGaussian() * 70); b.lookGoal = p.getEyeLocation().clone().add(-Math.sin(yaw) * 6, rnd.nextGaussian() * 1.5, Math.cos(yaw) * 6); }
+        }
+        if (b.lookGoal != null && b.lookGoal.getWorld().equals(p.getWorld())) face(b, b.lookGoal, 6 + rnd.nextDouble() * 6);
+    }
     void aim(Bot b, LivingEntity t, long now) {
         Location l = t.getLocation().clone().add(0, t.getHeight() * 0.75, 0);
+        if (st.b("reaction-lag") && !god(b)) {
+            b.hist.addFirst(l.clone()); while (b.hist.size() > 12) b.hist.removeLast();
+            int lag = (int) Math.round((1 + (1 - skill(b)) * 5) * st.d("reaction-scale") / 100.0);
+            Location old = null; int i = 0; for (Location h : b.hist) { old = h; if (i++ >= lag) break; }
+            if (old != null && old.getWorld().equals(l.getWorld())) {
+                // humans lead a moving target a bit, but late: blend old spot + part of the motion
+                Vector mv = l.toVector().subtract(old.toVector()).multiply(0.4 + 0.5 * skill(b));
+                l = old.clone().add(mv);
+            }
+        }
         if (!god(b) && roll(st.d("mistake-chance") * (1.6 - 1.4 * skill(b)))) l.add(rnd.nextGaussian() * 1.2, rnd.nextGaussian() * 0.4, rnd.nextGaussian() * 1.2);
         // small human-like wobble on the aim, smoothed so it drifts instead of shaking
         double wob = god(b) ? 0.08 : 0.15 + (1 - skill(b)) * 0.5;
+        if (st.b("panic") && !god(b) && b.p.getHealth() < maxHp(b.p) * 0.3) wob *= 1.8;
         b.jitterYaw = b.jitterYaw * 0.85 + rnd.nextGaussian() * wob * 0.15; b.jitterPitch = b.jitterPitch * 0.85 + rnd.nextGaussian() * wob * 0.08;
         l.add(b.jitterYaw, b.jitterPitch, b.jitterYaw * 0.5);
-        face(b, l, aimStep(b));
+        double step = aimStep(b);
+        if (st.b("fatigue") && !god(b) && b.fightStart > 0) step *= Math.max(0.8, 1 - (now - b.fightStart) / 12000.0);
+        face(b, l, step);
     }
     /** turn towards a point, at most maxStep degrees per tick */
     void face(Bot b, Location to, double maxStep) {
@@ -795,6 +855,18 @@ final class Brain {
         Location cur = b.p.getLocation();
         float dyaw = wrap(wantYaw - cur.getYaw()), dp = wantPitch - cur.getPitch();
         float step = (float) maxStep;
+        if (st.b("human-aim") && !god(b)) {
+            // a flick that's going to land too far (then comes back), like a real mouse
+            if (Math.abs(dyaw) > 30 && b.flickOver == 0 && roll(st.d("overshoot-chance"))) b.flickOver = Math.signum(dyaw) * (2 + rnd.nextDouble() * 6);
+            if (Math.abs(dyaw) < 8) b.flickOver *= 0.55; if (Math.abs(b.flickOver) < 0.3) b.flickOver = 0;
+            dyaw += (float) b.flickOver;
+            // ease in: fast when far off, slow and fine at the end
+            double ease = 1 - st.d("aim-smoothing") / 100.0 * 0.8;
+            float sy = (float) Math.min(step, Math.abs(dyaw) * ease + 0.6), sp = (float) Math.min(step, Math.abs(dp) * ease + 0.4);
+            float yaw = cur.getYaw() + Math.max(-sy, Math.min(sy, dyaw)), pitch = cur.getPitch() + Math.max(-sp, Math.min(sp, dp));
+            look(b, yaw, Math.max(-90, Math.min(90, pitch)));
+            return;
+        }
         float yaw = cur.getYaw() + Math.max(-step, Math.min(step, dyaw)), pitch = cur.getPitch() + Math.max(-step, Math.min(step, dp));
         look(b, yaw, Math.max(-90, Math.min(90, pitch)));
     }

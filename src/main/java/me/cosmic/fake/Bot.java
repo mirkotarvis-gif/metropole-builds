@@ -48,4 +48,8 @@ final class Bot {
     double needNext = 0.95; long pauseUntil, diedAt = -1000;
     Style style = Style.random();
     boolean asleep; LivingEntity warCache; long warAt = -100;
+    // ---- human feel
+    final java.util.ArrayDeque<Location> hist = new java.util.ArrayDeque<>(); // where the target was over the last ticks (reaction lag)
+    double flickOver; Material lastHeld; long switchReady, fightStart, glanceUntil, nextGlance, killAt = -1000, lookUntil;
+    int wtapTicks; LivingEntity lastFoe; long lastFoeAt; Location killSpot, lookGoal;
 }

@@ -22,14 +22,16 @@ final class Store {
         for (String k : new String[]{"auto-armor", "auto-weapon", "combat", "revenge", "target-players", "criticals", "ranged", "mace", "crystal-pvp", "anchor-pvp",
                 "retreat", "auto-totem", "totem-priority", "auto-shield", "shield-break", "shield-mace", "prefer-sword", "auto-eat", "auto-potion", "auto-mend", "bhop",
                 "safe-spawn", "clear-on-remove", "arrow-prediction", "ranged-strafe", "ranged-retreat", "cobwebs",
-                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick", "bot-leave-on-death", "graveyard", "auto-performance"}) DEFAULTS.put(k, true);
+                "knockback", "s-tap", "jump-reset", "crit-spam", "stun", "stun-web", "web-escape", "anti-mace", "pearls", "teamwork", "fullbox", "cart-pvp", "random-nick", "bot-leave-on-death", "graveyard", "auto-performance",
+                "human-aim", "reaction-lag", "hotbar-delay", "air-swings", "w-tap", "panic", "glance-back", "loot-after-kill", "look-around", "fatigue"}) DEFAULTS.put(k, true);
         for (String k : new String[]{"target-bots", "drop-armor", "drop-weapon", "auto-target", "target-mobs", "idle", "friendly-fire", "special-names",
-                "attack-invincible", "profile-lagg-fix"}) DEFAULTS.put(k, false);
+                "attack-invincible", "profile-lagg-fix", "taunt"}) DEFAULTS.put(k, false);
         num("interval", 1, 1, 100); num("attack-cooldown", 10, 1, 40); num("crit-fall-ticks", 3, 1, 10); num("shield-hold-ticks", 40, 10, 200);
         num("shield-raise-ticks", 5, 2, 40); num("bow-draw-ticks", 22, 5, 100); num("melee-range", 3.0, 2, 6); num("move-speed", 1.0, 0.1, 2.0);
         num("view-distance", 32, 5, 128); num("aim-speed", 30, 3, 90); num("drop-distance", 3, 1, 10); num("idle-radius", 10, 3, 50);
         num("shield-break-chance", 80, 0, 100); num("miss-chance", 8, 0, 100); num("mistake-chance", 5, 0, 100);
         num("ranged-min-range", 6, 3, 20); num("ranged-optimal-range", 18, 10, 50); num("ranged-max-range", 40, 15, 100); num("max-mass-spawn", 50, 1, 10000); num("skill", 70, 1, 101); num("sleep-distance", 128, 0, 1000);
+        num("reaction-scale", 100, 0, 300); num("overshoot-chance", 25, 0, 100); num("air-swing-chance", 10, 0, 100); num("aim-smoothing", 45, 0, 90);
     }
     static void num(String k, double v, double lo, double hi) { DEFAULTS.put(k, v); RANGE.put(k, new double[]{lo, hi}); }
     final Map<String, Object> set = new LinkedHashMap<>(DEFAULTS);

@@ -37,6 +37,8 @@ final class SettingsGui implements Listener {
                     "attack-invincible"}),
             new Page("Bots", Material.PLAYER_HEAD, new String[]{"random-nick", "bot-leave-on-death", "safe-spawn", "idle", "special-names", "profile-lagg-fix",
                     "auto-performance", "sleep-distance", "max-mass-spawn", "view-distance", "idle-radius", "drop-distance", "move-speed", "interval"}),
+            new Page("Human Feel", Material.ARMOR_STAND, new String[]{"human-aim", "aim-smoothing", "overshoot-chance", "reaction-lag", "reaction-scale",
+                    "hotbar-delay", "air-swings", "air-swing-chance", "w-tap", "panic", "glance-back", "fatigue", "loot-after-kill", "taunt", "look-around"}),
             new Page("Skill & Aim", Material.SPYGLASS, new String[]{"skill", "aim-speed", "miss-chance", "mistake-chance", "melee-range", "attack-cooldown",
                     "crit-fall-ticks", "shield-break-chance", "shield-hold-ticks", "shield-raise-ticks", "bow-draw-ticks", "ranged-min-range",
                     "ranged-optimal-range", "ranged-max-range"}),
@@ -54,6 +56,14 @@ final class SettingsGui implements Listener {
                 {"retreat", "Run when low"}, {"bhop", "Bunny hop when chasing"}, {"random-nick", "Random nick + skin on spawn"},
                 {"bot-leave-on-death", "Bots leave when they die"}, {"auto-target", "Attack anyone nearby"}, {"skill", "Default difficulty (101 = marlowww)"},
                 {"max-mass-spawn", "Max bots per mass-spawn"}, {"aim-speed", "Degrees per tick"}, {"interval", "Think every N ticks"}, {"auto-performance", "Less thinking per bot when there are lots"}, {"sleep-distance", "Bots this far from every real player freeze (0 = never)"},
+                {"human-aim", "Mouse-like aim: speeds up, slows down, flicks past and corrects"}, {"aim-smoothing", "How much the aim eases in (0 = robotic snap)"},
+                {"overshoot-chance", "% chance a big flick goes too far first"}, {"reaction-lag", "Aim where the target WAS a few ticks ago"},
+                {"reaction-scale", "% reaction delay (100 = normal for their skill)"}, {"hotbar-delay", "Switching items takes a moment"},
+                {"air-swings", "Spam-click swings while waiting for cooldown"}, {"air-swing-chance", "% chance per tick of an air swing"},
+                {"w-tap", "Let go of W after sprint hits (mixed with s-tap)"}, {"panic", "Shakier aim + earlier clicks when low"},
+                {"glance-back", "Look back at you while running away"}, {"fatigue", "Get a bit slower in long fights"},
+                {"loot-after-kill", "Walk over to pick up the loot after a kill"}, {"taunt", "Crouch spam after a kill"},
+                {"look-around", "Look around at players when idle"},
         };
         for (String[] x : d) INFO.put(x[0], x[1]);
     }
@@ -72,8 +82,9 @@ final class SettingsGui implements Listener {
         for (int i = 0; i < PAGES.length; i++) {
             ItemStack tab = item(PAGES[i].icon(), (i == page ? "§a§l" : "§e") + PAGES[i].title(), List.of(i == page ? "§7You're here" : "§7Click to open"));
             if (i == page) glow(tab);
-            inv.setItem(i * 2, tab);
-            h.slots.put(i * 2, "#page" + i);
+            int ts = PAGES.length <= 5 ? i * 2 : i;
+            inv.setItem(ts, tab);
+            h.slots.put(ts, "#page" + i);
         }
         int slot = 9;
         for (String k : PAGES[page].keys()) {
