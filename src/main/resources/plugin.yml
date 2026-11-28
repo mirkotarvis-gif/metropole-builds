@@ -1,0 +1,13 @@
+name: TerrainRegen
+version: 1.0.0
+main: me.regen.TerrainRegen
+api-version: '1.21'
+description: Regenerate the natural terrain around you, exactly as the world seed made it.
+commands:
+  regen:
+    description: Regenerate terrain around you
+    usage: /regen <chunks> [confirm] | /regen cancel | /regen status
+    permission: terrainregen.use
+permissions:
+  terrainregen.use:
+    default: op
