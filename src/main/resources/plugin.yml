@@ -1,0 +1,13 @@
+name: NoAdvancements
+version: 1.0.0
+main: me.noadv.NoAdvancements
+api-version: '1.21'
+description: Nobody gets advancements (no toasts, no chat messages). Recipe unlocks still work.
+commands:
+  noadv:
+    description: Turn advancements off/on, or wipe everyone's advancements
+    usage: /noadv [on|off|reset]
+    permission: noadv.admin
+permissions:
+  noadv.admin:
+    default: op

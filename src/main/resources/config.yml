@@ -1,0 +1,4 @@
+# block every advancement (recipe unlocks still work)
+enabled: true
+# also wipe a player's old advancements when they join
+wipe-on-join: false

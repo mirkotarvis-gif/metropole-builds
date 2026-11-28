@@ -1,0 +1,23 @@
+name: build
+on: { push: { branches: [noadvancements] }, workflow_dispatch: {} }
+permissions: { contents: write }
+jobs:
+  build:
+    if: "!contains(github.event.head_commit.message, '[built]')"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: '21' }
+      - uses: gradle/actions/setup-gradle@v4
+        with: { gradle-version: '8.14.3' }
+      - name: Build
+        run: gradle jar --stacktrace 2>&1 | tee build.log; exit ${PIPESTATUS[0]}
+      - name: Commit result
+        if: always()
+        run: |
+          mkdir -p out && rm -f out/*
+          cp build.log out/ || true
+          cp build/libs/*.jar out/ 2>/dev/null || true
+          git config user.name ci; git config user.email ci@users.noreply.github.com
+          git add -f out && git commit -m "CI output [built] (${{ job.status }})" && git push
