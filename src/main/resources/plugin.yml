@@ -1,0 +1,14 @@
+name: PaneConnect
+version: 1.0.0
+main: me.panes.PaneConnect
+api-version: '1.21'
+description: Fixes glass panes, iron bars and fences that didn't connect after a paste.
+commands:
+  connect:
+    description: Connect every glass pane, iron bar and fence around you
+    usage: /connect [radius] | /connect stop
+    aliases: [panes, connectpanes]
+    permission: paneconnect.use
+permissions:
+  paneconnect.use:
+    default: op
