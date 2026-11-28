@@ -1,12 +1,12 @@
 name: TntClear
-version: 1.0.0
+version: 1.1.0
 main: me.tntclear.TntClear
 api-version: '1.21'
 description: Remove every TNT in the world, lit or not.
 commands:
   tnt:
     description: Clear TNT
-    usage: /tnt clear [lit|blocks|all] | /tnt explosions <on|off>
+    usage: /tnt clear [world|loaded|lit|blocks] | /tnt explosions <on|off>
     permission: tntclear.use
 permissions:
   tntclear.use:
