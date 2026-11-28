@@ -1,0 +1,28 @@
+
+Welcome to Gradle 8.14.3!
+
+Here are the highlights of this release:
+ - Java 24 support
+ - GraalVM Native Image toolchain selection
+ - Enhancements to test reporting
+ - Build Authoring improvements
+
+For more details see https://docs.gradle.org/8.14.3/release-notes.html
+
+Starting a Gradle Daemon (subsequent builds will be faster)
+
+> Task :compileJava
+/home/runner/work/metropole-builds/metropole-builds/src/main/java/me/regen/TerrainRegen.java:45: warning: [removal] setKeepSpawnInMemory(boolean) in World has been deprecated and marked for removal
+        if (t != null) { t.setAutoSave(false); t.setKeepSpawnInMemory(false); }
+                                                ^
+1 warning
+
+> Task :processResources
+> Task :classes
+> Task :jar
+gradle/actions: Writing build results to /home/runner/work/_temp/.gradle-actions/build-results/__run-1795871107804.json
+
+[Incubating] Problems report is available at: file:///home/runner/work/metropole-builds/metropole-builds/build/reports/problems/problems-report.html
+
+BUILD SUCCESSFUL in 27s
+3 actionable tasks: 3 executed
